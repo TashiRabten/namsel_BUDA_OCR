@@ -7,7 +7,7 @@
 
 import cv2 as cv
 import numpy as np
-from sklearn.mixture import GaussianMixture as GMM
+from sklearn.mixture import GMM
 #import font_detector
 from scipy.stats import mode as statsmode
 
@@ -19,7 +19,7 @@ from scipy.ndimage.interpolation import rotate
 # from utils_extra import add_padding, trim, invert_bw
 from .utils import invert_bw
 from .feature_extraction import normalize_and_extract_features
-from .fast_utils import to255
+from fast_utils import to255
 # from yik import word_parts_set
 from scipy.ndimage.filters import gaussian_filter1d
 from scipy.signal import argrelmin
@@ -155,7 +155,7 @@ class PageElements(object):
 #                     print cbox
 #                     raw_input('continue?')
                 if cbox[2] > .66*self.img_arr.shape[1]:
-                    print((cbox[2] / float(self.img_arr.shape[1])))
+                    print(cbox[2] / float(self.img_arr.shape[1]))
                 if clear_hr and .995*self.img_arr.shape[1] > cbox[2] > \
                 .66*self.img_arr.shape[1] and cbox[1] < .25*self.img_arr.shape[0]:
                     self.img_arr[0:cbox[1]+cbox[3], :] = 1
@@ -233,7 +233,7 @@ class PageElements(object):
             if is_emph_symbol:
                 self.emph_symbols.append(i)
                 
-                print(('EMPHSYMBOLFOUND', quick_prd.encode('utf-8')))
+                print('EMPHSYMBOLFOUND', quick_prd.encode('utf-8'))
 #                 cv.rectangle(self.img_arr, (x,y), (x+w, y+h), 0)
             elif quick_prd == 'ོ' and self.detect_o:
                 self.naros.append(i)
@@ -279,7 +279,7 @@ class PageElements(object):
 #        print scount
 #         raw_input()
         if self.detect_o:
-            print(('pre-filtered na-ro vowel', len(self.naros), 'found'))    
+            print('pre-filtered na-ro vowel', len(self.naros), 'found')    
         
 #        for i in self.indices:
             #                if cbox[2] > 50: print cbox[2],

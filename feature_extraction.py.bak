@@ -1,15 +1,16 @@
-import pickle as pickle
+import cPickle as pickle
 from cv2 import GaussianBlur
 from cv2 import HuMoments, moments, GaussianBlur
-from .fast_utils import fnormalize, scale_transform
+from fast_utils import fnormalize, scale_transform
 import numpy as np
-import joblib
-from sklearn.mixture import GaussianMixture  # Updated import
-from .sobel_features import sobel_features
-from .transitions import transition_features
-from .zernike_moments import zernike_features
+from sklearn.externals import joblib
+from sklearn.mixture import GMM
+from sobel_features import sobel_features
+from transitions import transition_features
+from zernike_moments import zernike_features
 import os
-from .utils import local_file
+from utils import local_file
+
 import platform
 
 SCALER_PATH = 'zernike_scaler-latest'
@@ -24,8 +25,9 @@ if os.path.exists(SCALER_PATH):
     SCALER_DEFINED = True
 else:
     SCALER_DEFINED = False
-
+    
 FEAT_SIZE = 346
+
 hstack = np.hstack
 
 NORM_SIZE = 32
@@ -37,31 +39,25 @@ magnitude = np.empty(ARR_SHAPE, np.double)
 direction = np.empty(ARR_SHAPE, np.double)
 sx = np.empty(ARR_SHAPE, np.double)
 sy = np.empty(ARR_SHAPE, np.double)
-x2 = np.zeros((192), dtype=np.int32)  # Changed dtype from np.int to np.int32 for compatibility
+x2 = np.zeros((192), np.int)
 
-try:
-    if platform.system() == "Windows":
-        D = pickle.load(open(local_file(r'features\D_matrix.pkl'), 'rb'))  # Fixed mode to 'rb'
-        Bpqk = pickle.load(open(local_file(r'features\Bpqk17.pkl'), 'rb'))  # Fixed mode to 'rb'
-        Ipi = pickle.load(open(local_file(r'features\Ipi32.pkl'), 'rb'))  # Fixed mode to 'rb'
-    else:
-        D = pickle.load(open(local_file('features/D_matrix.pkl'), 'rb'))  # Fixed mode to 'rb'
-        Bpqk = pickle.load(open(local_file('features/Bpqk17.pkl'), 'rb'))  # Fixed mode to 'rb'
-        Ipi = pickle.load(open(local_file('features/Ipi32.pkl'), 'rb'))  # Fixed mode to 'rb'
-except Exception as e:
-    print(f"Warning: Could not load feature files: {e}")
-    # Create dummy data for now
-    D = np.eye(100)
-    Bpqk = np.zeros((18, 18))
-    Ipi = np.zeros((32, 32))
+if platform.system() == "Windows":
+    D = pickle.load(open(local_file(r'features\D_matrix.pkl'),'r'))
+    Bpqk = pickle.load(open(local_file(r'features\Bpqk17.pkl'), 'rb'))
+    Ipi = pickle.load(open(local_file(r'features\Ipi32.pkl'),'rb'))
+else:
+    D = pickle.load(open(local_file('features/D_matrix.pkl'),'r'))
+    Bpqk = pickle.load(open(local_file('features/Bpqk17.pkl'), 'rb'))
+    Ipi = pickle.load(open(local_file('features/Ipi32.pkl'),'rb'))
 
 Ipi = np.array(Ipi, Ipi.dtype, order='F')
 deg = 17
-Mpqs = np.zeros((deg+1, deg+1), np.double, order='F')
-Rpq = np.empty((deg+1, deg+1), complex)
-ws = np.array([1, -1j, -1, 1j], complex)
+# Mpqs = np.empty((deg+1,deg+1), np.double)
+Mpqs = np.zeros((deg+1,deg+1), np.double, order = 'F')
+Rpq = np.empty((deg+1,deg+1), complex)
+ws = np.array([1,-1j,-1,1j], complex)
 Zpq = np.empty((90), np.double)
-Yiq = np.zeros((deg+1, NORM_SIZE), np.double, order='F')
+Yiq = np.zeros((deg+1,NORM_SIZE), np.double, order='F')
 
 
 def normalize_and_extract_features(arr):
@@ -76,14 +72,14 @@ def extract_features(arr, scale=True):
     transition_features(arr, x3)
     arr = arr.astype(np.double)
     Yiq.fill(0.0)
-    zernike_features(arr, D, Bpqk, Ipi, Mpqs, Rpq, Yiq, ws, Zpq)
-    GaussianBlur(arr, ksize=(5, 5), sigmaX=1, dst=newarr)
+    zernike_features(arr,D,Bpqk,Ipi, Mpqs, Rpq, Yiq, ws, Zpq)
+    GaussianBlur(arr, ksize=(5,5), sigmaX=1, dst=newarr)
     x2.fill(0)
     sobel_features(arr, magnitude, direction, sx, sy, x2)
-    x1 = hstack((Zpq, x2, x3))
+    x1 = hstack((Zpq,x2, x3))
     if scale:
         if not SCALER_DEFINED:
-            raise ValueError('Scaler not defined')
+            raise ValueError, 'Scaler not defined'
         scale_transform(x1, sc_mean, sc_o_std, FEAT_SIZE)
     return x1
 
@@ -101,22 +97,22 @@ def invert_binary_image(arr):
     --------
     2d inverted array
     '''
-    if not isinstance(arr, np.ndarray):
-        arr = np.array(arr, np.uint8)  # Ensure input is a numpy array
+    if not hasattr(arr, 'dtype'):
+        arr = np.array(arr, np.uint8)
     
     if np.max(arr) == 255:
         return (arr / -255) + 1
     else:
         return (arr * -1) + 1
-
+   
 
 def get_zernike_moments(arr):
+
     if arr.shape != (32, 32):
         arr.shape = (32, 32)
     
-    zernike_features(arr, D, Bpqk, Ipi, Mpqs, Rpq, Yiq, ws, Zpq)
+    zernike_features(arr,D,Bpqk,Ipi, Mpqs, Rpq, Yiq, ws, Zpq)
     return Zpq
-
 
 def get_hu_moments(arr):
     arr = invert_binary_image(arr)

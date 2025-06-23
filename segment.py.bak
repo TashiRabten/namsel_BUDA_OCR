@@ -1,18 +1,18 @@
 # encoding: utf-8
 from .classify import load_cls, label_chars
 import cv2 as cv
-from .fast_utils import fnormalize, ftrim, gausslogprob, fadd_padding
+from fast_utils import fnormalize, ftrim, gausslogprob, fadd_padding
 from .feature_extraction import normalize_and_extract_features 
 from numpy import floor, uint8, ones, argmax, hstack, mean, std, \
     ceil, load
 import numpy as np
 from random import gauss
 from .page_elements2 import PageElements
-import joblib
+from sklearn.externals import joblib
 from tempfile import mkdtemp
-from .transitions import horizontal_transitions
+from transitions import horizontal_transitions
 from .utils import add_padding, local_file, check_for_overlap
-from .viterbi_cython import viterbi_cython
+from viterbi_cython import viterbi_cython
 
 import platform
 
@@ -571,7 +571,7 @@ class Segmenter(object):
                 scale_l = scales[l]
                 oo_scale_l = 1.0/scale_l 
             except:
-                print(('ERROR AT ', l, len(scales)))
+                print('ERROR AT ', l, len(scales))
                 raise
             try:
                 lb = list(range(len(final_indices[l])))
@@ -669,14 +669,14 @@ class Segmenter(object):
                                 overlap = check_for_overlap(box1, box)
                             except:
                                 
-                                print((i, k, box1, 'BOX problem'))
+                                print(i, k, box1, 'BOX problem')
                             if overlap:
                                 used_boxes.add(n)
                                 
                                 try:
                                     nbox = list(combine_many_boxes([box, box1]))
                                 except:
-                                    print((nbox, 'slkfjlkfj'))
+                                    print(nbox, 'slkfjlkfj')
                                     raise
                                 if isinstance(self.vectors[i][k], str):
                                     self.vectors[i][k] += 'ོ'
@@ -720,7 +720,7 @@ class Segmenter(object):
             try:
                 scale_l = scales[l]
             except:
-                print(('ERROR AT ', l, len(scales)))
+                print('ERROR AT ', l, len(scales))
                 raise
             char_mean_int = floor(final_box_info.char_mean) 
             char_std_int = ceil(final_box_info.char_std) 
@@ -879,7 +879,7 @@ class Segmenter(object):
                                 try:
                                     nbox = list(combine_many_boxes([box, b]))
                                 except:
-                                    print((nbox[3]))
+                                    print(nbox[3])
                                     raise
                                 if isinstance(self.vectors[i][k], str):
                                     self.vectors[i][k] += 'ོ'
@@ -941,7 +941,7 @@ class Segmenter(object):
                 scale_l = scales[l]
                 oo_scale_l = 1.0/scale_l 
             except:
-                print(('ERROR AT ', l, len(scales)))
+                print('ERROR AT ', l, len(scales))
                 raise
 
             for ii, i in enumerate(lb): # for each line box

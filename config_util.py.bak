@@ -1,6 +1,6 @@
-import pickle as pickle
+import cPickle as pickle
 import uuid
-from .utils import local_file
+from utils import local_file
 import codecs
 import json
 
@@ -39,7 +39,7 @@ def add_new_config(conf):
     return
 
 def _is_duplicate_conf(all_confs, conf):
-    keys = list(defaults.keys())
+    keys = defaults.keys()
     is_duplicate = False
 
     for oconf in all_confs:

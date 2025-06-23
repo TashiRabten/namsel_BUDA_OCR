@@ -6,7 +6,7 @@ import codecs
 import os
 import glob
 import numpy as np
-from .utils import create_unique_id, local_file
+from utils import create_unique_id, local_file
 from collections import Counter
 
 import platform
@@ -87,7 +87,7 @@ class Config(object):
             for k in conf:
                 self.conf[k] = conf[k]
         except IOError:
-            print('Error in loading json file at %s. Using default config' % path)
+            print 'Error in loading json file at %s. Using default config' % path
             self.conf = default_config
     
      

@@ -14,7 +14,7 @@ from .recognize import recognize_chars_probout, recognize_chars_hmm, \
 from .segment import Segmenter, combine_many_boxes
 import argparse
 from .utils_extra.scantailor_multicore import run_scantailor
-from .fast_utils import fadd_padding
+from fast_utils import fadd_padding
 import codecs
 import os
 from .yik import word_parts_set
@@ -134,7 +134,7 @@ class PageRecognizer(object):
             for n, line in enumerate(results):
                 for m,k in enumerate(line):
                     if isinstance(k[-1], int):
-                        print((n,m,k))
+                        print(n,m,k)
                         self.page_array[k[1]:k[1]+k[3], k[0]:k[0]+k[2]] = 0
                         Image.fromarray(self.page_array*255).show()
                         
@@ -155,9 +155,9 @@ class PageRecognizer(object):
         except:
             import traceback;traceback.print_exc()
             if not results and not conf['viterbi_postprocessing']:
-                print(('WARNING', '*'*40))
-                print((self.page_info['flname'], 'failed to return a result.'))
-                print(('WARNING', '*'*40))
+                print('WARNING', '*'*40)
+                print(self.page_info['flname'], 'failed to return a result.')
+                print('WARNING', '*'*40)
                 print()
                 if self.line_break_method == 'line_cut' and self.retries < 1:
                     print('retrying with line_cluster instead of line_cut')
@@ -197,7 +197,7 @@ class PageRecognizer(object):
                         syl_str = ''.join(s[-1] for s in syllable)
                         
                         if is_non_std(syl_str) and syl_str not in syllables:
-                            print((syl_str, 'HAS PROBLEMS. TRYING TO FIX'))
+                            print(syl_str, 'HAS PROBLEMS. TRYING TO FIX')
                             bx = combine_many_boxes([ch[0:4] for ch in syllable])
                             bx = list(bx)
 

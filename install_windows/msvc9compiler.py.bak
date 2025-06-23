@@ -25,17 +25,17 @@ from distutils.ccompiler import CCompiler, gen_lib_options
 from distutils import log
 from distutils.util import get_platform
 
-import winreg
+import _winreg
 
-RegOpenKeyEx = winreg.OpenKeyEx
-RegEnumKey = winreg.EnumKey
-RegEnumValue = winreg.EnumValue
-RegError = winreg.error
+RegOpenKeyEx = _winreg.OpenKeyEx
+RegEnumKey = _winreg.EnumKey
+RegEnumValue = _winreg.EnumValue
+RegError = _winreg.error
 
-HKEYS = (winreg.HKEY_USERS,
-         winreg.HKEY_CURRENT_USER,
-         winreg.HKEY_LOCAL_MACHINE,
-         winreg.HKEY_CLASSES_ROOT)
+HKEYS = (_winreg.HKEY_USERS,
+         _winreg.HKEY_CURRENT_USER,
+         _winreg.HKEY_LOCAL_MACHINE,
+         _winreg.HKEY_CLASSES_ROOT)
 
 NATIVE_WIN64 = (sys.platform == 'win32' and sys.maxsize > 2**32)
 if NATIVE_WIN64:
@@ -165,7 +165,7 @@ you can try compiling with MingW32, by passing "-c mingw32" to setup.py.""")
                 self.macros["$(FrameworkVersion)"] = d["version"]
 
     def sub(self, s):
-        for k, v in list(self.macros.items()):
+        for k, v in self.macros.items():
             s = s.replace(k, v)
         return s
 
@@ -505,7 +505,7 @@ class MSVCCompiler(CCompiler) :
                 try:
                     self.spawn([self.rc] + pp_opts +
                                [output_opt] + [input_opt])
-                except DistutilsExecError as msg:
+                except DistutilsExecError, msg:
                     raise CompileError(msg)
                 continue
             elif ext in self._mc_extensions:
@@ -532,7 +532,7 @@ class MSVCCompiler(CCompiler) :
                     self.spawn([self.rc] +
                                ["/fo" + obj] + [rc_file])
 
-                except DistutilsExecError as msg:
+                except DistutilsExecError, msg:
                     raise CompileError(msg)
                 continue
             else:
@@ -545,7 +545,7 @@ class MSVCCompiler(CCompiler) :
                 self.spawn([self.cc] + compile_opts + pp_opts +
                            [input_opt, output_opt] +
                            extra_postargs)
-            except DistutilsExecError as msg:
+            except DistutilsExecError, msg:
                 raise CompileError(msg)
 
         return objects
@@ -570,7 +570,7 @@ class MSVCCompiler(CCompiler) :
                 pass # XXX what goes here?
             try:
                 self.spawn([self.lib] + lib_args)
-            except DistutilsExecError as msg:
+            except DistutilsExecError, msg:
                 raise LibError(msg)
         else:
             log.debug("skipping %s (up-to-date)", output_filename)
@@ -651,7 +651,7 @@ class MSVCCompiler(CCompiler) :
             self.mkpath(os.path.dirname(output_filename))
             try:
                 self.spawn([self.linker] + ld_args)
-            except DistutilsExecError as msg:
+            except DistutilsExecError, msg:
                 raise LinkError(msg)
 
             # embed the manifest
@@ -666,7 +666,7 @@ class MSVCCompiler(CCompiler) :
                 try:
                     self.spawn(['mt.exe', '-nologo', '-manifest',
                                 mffilename, out_arg])
-                except DistutilsExecError as msg:
+                except DistutilsExecError, msg:
                     raise LinkError(msg)
         else:
             log.debug("skipping %s (up-to-date)", output_filename)

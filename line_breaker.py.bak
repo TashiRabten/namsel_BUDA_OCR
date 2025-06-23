@@ -2,12 +2,12 @@
 '''Line breaking'''
 from numpy import  array, float64, argmax, argmin, uint8, ones, floor, mean, std, where, argsort
 import cv2 as cv
-from .utils import  check_for_overlap
-from .fast_utils import ftrim, fadd_padding
+from utils import  check_for_overlap
+from fast_utils import ftrim, fadd_padding
 import sys
 from bisect import bisect, bisect_right
-from .feature_extraction import normalize_and_extract_features
-from .classify import load_cls, label_chars
+from feature_extraction import normalize_and_extract_features
+from classify import load_cls, label_chars
 
 cls = load_cls('logistic-cls')
 
@@ -131,7 +131,7 @@ class LineCut(object):
         linear for zip and index extraction
         bisect is log n
         '''
-        char_tops = list(zip(self.shapes.get_tops(), self.shapes.get_indices()))
+        char_tops = zip(self.shapes.get_tops(), self.shapes.get_indices())
         char_tops.sort(key=lambda x: x[0])
         sorted_indices = [i[1] for i in char_tops]
         _line_insert_indxs = []
@@ -148,7 +148,7 @@ class LineCut(object):
         
         ## Small contour insertion
         cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.small_contour_indices]
-        char_tops = list(zip(cctops, self.shapes.small_contour_indices))
+        char_tops = zip(cctops, self.shapes.small_contour_indices)
         char_tops.sort(key=lambda x: x[0])
         sorted_indices = [i[1] for i in char_tops]
         _line_insert_indxs = []
@@ -167,7 +167,7 @@ class LineCut(object):
 
         if self.shapes.detect_o:
             cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.naros]
-            char_tops = list(zip(cctops, self.shapes.naros))
+            char_tops = zip(cctops, self.shapes.naros)
             char_tops.sort(key=lambda x: x[0])
             sorted_indices = [i[1] for i in char_tops]
             _line_insert_indxs = []
@@ -187,7 +187,7 @@ class LineCut(object):
         if self.shapes.low_ink:
             
             cctops = [lib[1] for lib in self.shapes.low_ink_boxes]
-            char_tops = list(zip(cctops, self.shapes.low_ink_boxes))
+            char_tops = zip(cctops, self.shapes.low_ink_boxes)
             char_tops.sort(key=lambda x: x[0])
             sorted_indices = [i[1] for i in char_tops]
             _line_insert_indxs = []
@@ -292,7 +292,7 @@ class LineCluster(object):
                     dtype=float64
                          )
         else:
-            raise ValueError("The line_cluster_pos argument must be either 'top' or 'center'")
+            raise ValueError, "The line_cluster_pos argument must be either 'top' or 'center'"
 
         tops.shape = (len(tops), 1)
         
@@ -335,7 +335,7 @@ class LineCluster(object):
         try:
             topmosts = [min([boxes[i][1] for i in line]) for line in lines]
         except ValueError:
-            print('failed to get topmosts...')
+            print 'failed to get topmosts...'
             raise
         
         vsums = self.page_array.sum(axis=1)
@@ -362,10 +362,10 @@ class LineCluster(object):
                 if baseline_area.any():
                     self.baselines.append(br + argmin(baseline_area))
                 else:
-                    print(i)
-                    print('No baseline info')
+                    print i
+                    print 'No baseline info'
             except ValueError:
-                print('ValueError. exiting...HERE')
+                print 'ValueError. exiting...HERE'
                 import traceback;traceback.print_exc()
                 
                 raise
@@ -414,11 +414,11 @@ class LineCluster(object):
                         chr = label_chars[max_prob_ind]
                         prd_cut.append((probs[0,max_prob_ind], chr, cut_point))
                     
-                    prd_cut = [q for q in prd_cut if q[1] != '་']
+                    prd_cut = [q for q in prd_cut if q[1] != u'་']
                     try:
                         cut_point = max(prd_cut)[-1]
                     except:
-                        print('No max prob for vertical char break, using default breakline. Usually this means the top half of the attempted segmentation looks like a tsek blob')
+                        print 'No max prob for vertical char break, using default breakline. Usually this means the top half of the attempted segmentation looks like a tsek blob'
                         cut_point = br-boxes[i][1]
 
                     #######FOLLWNG NOT WORKING ATTEMPTS TO GET A BETTER BREAK LINE
@@ -470,12 +470,12 @@ class LineCluster(object):
                 else:
                     final_ind[j].append(i)
             # Don't forget to include the last line
-        list(map(final_ind[len(lines)-1].append, lines[len(lines)-1]))
+        map(final_ind[len(lines)-1].append, lines[len(lines)-1])
         
         self.lines_chars = final_ind
         
         cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.small_contour_indices]
-        char_tops = list(zip(cctops, self.shapes.small_contour_indices))
+        char_tops = zip(cctops, self.shapes.small_contour_indices)
         char_tops.sort(key=lambda x: x[0])
         sorted_indices = [i[1] for i in char_tops]
         _line_insert_indxs = []
@@ -492,7 +492,7 @@ class LineCluster(object):
         self.small_cc_lines_chars = [self.small_cc_lines_chars[i] for i in range(len(self.lines_chars)) if self.lines_chars[i]]
        
         cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.emph_symbols]
-        char_tops = list(zip(cctops, self.shapes.emph_symbols))
+        char_tops = zip(cctops, self.shapes.emph_symbols)
         char_tops.sort(key=lambda x: x[0])
 
         empred = [kmeans.predict(shapes.get_boxes()[i][1])[0] for i in self.shapes.emph_symbols]
@@ -504,7 +504,7 @@ class LineCluster(object):
     
         if self.shapes.detect_o:
             cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.naros]
-            char_tops = list(zip(cctops, self.shapes.naros))
+            char_tops = zip(cctops, self.shapes.naros)
             char_tops.sort(key=lambda x: x[0])
             sorted_indices = [i[1] for i in char_tops]
             _line_insert_indxs = []
@@ -534,7 +534,7 @@ class LineCluster(object):
         if self.shapes.low_ink:
             
             cctops = [lib[1] for lib in self.shapes.low_ink_boxes]
-            char_tops = list(zip(cctops, self.shapes.low_ink_boxes))
+            char_tops = zip(cctops, self.shapes.low_ink_boxes)
             char_tops.sort(key=lambda x: x[0])
             sorted_indices = [i[1] for i in char_tops]
             _line_insert_indxs = []
