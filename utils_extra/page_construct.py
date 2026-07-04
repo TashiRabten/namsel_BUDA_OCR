@@ -1,6 +1,6 @@
 import os
 import gzip
-import cPickle as pickle
+import pickle as pickle
 import shelve
 
 allchars = shelve.open('/home/zr/letters/allchars_dict2')
@@ -17,8 +17,8 @@ def construct_content(info):
     for i, char in enumerate(info[:-1]):
         content.append(allchars['label_chars'][char[2]])
         if info[i+1][0] == char[0] +1:
-            content.append(u'\n')
+            content.append('\n')
         elif info[i+1][3] - char[4] >= TSEK_APPR_MEAN *2:
-            content.append(u' ')
+            content.append(' ')
     content.append(allchars['label_chars'][info[-1][2]])
     return ''.join(content)

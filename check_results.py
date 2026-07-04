@@ -11,13 +11,13 @@
 '''
     
 
-from root_based_finder import is_non_std, word_parts
-from termset import syllables as termset
+from .root_based_finder import is_non_std, word_parts
+from .termset import syllables as termset
 import re
 import codecs
-word_parts = u''.join(list(word_parts))
+word_parts = ''.join(list(word_parts))
 
-reg = re.compile(ur'[^%s]*' % word_parts)
+reg = re.compile(r'[^%s]*' % word_parts)
 
 LOG = False
 
@@ -30,7 +30,7 @@ class TextScores():
         self.set_text_scores(text, multiline)
     
     def __repr__(self): 
-        return '%s' % str('\n'.join('%s : %s' % (k, repr(v)) for (k, v) in self.__dict__.iteritems()))
+        return '%s' % str('\n'.join('%s : %s' % (k, repr(v)) for (k, v) in self.__dict__.items()))
     
     @classmethod
     def _dict_score(self, syllables, multiline=False):
@@ -192,7 +192,7 @@ class TextScores():
             scores = []
             for i,l in enumerate(lines):
                 total = 0.
-                for j in u'་།':
+                for j in '་།':
                     total += l.count(j)
 #                scores.append(total/(float(len(l)-1) or 1)) # no divide by zero
                 scores.append(total/(float(len(l)))) # no divide by zero
@@ -200,7 +200,7 @@ class TextScores():
         else:
             len_syl = len(reg.split(text))
             total = 0.
-            for j in u'་།':
+            for j in '་།':
                 total += text.count(j)
             results['all_text_punc_syl_ratio'] = total / len_syl
             
@@ -226,7 +226,7 @@ class TextScores():
         self.__dict__.update(results)
     
 if __name__ == '__main__':
-    sample = u'''གང་དྲན་ཆོས་སྐུར་ཤེས། །སྨིག་རྒྱུ་ནམ་མཁར་ཤེས་པ་འདྲ། །བརྟུལ་ཞགས་མཆོག་གི་སྤྱོད་པ་ནི། །མཚམས་མེད་ལྔ་དང་མི་དགེ་བཅུ། །ཆགས་སྡང་ལྔ་ལ་ལོངས་སྤྱད་ཀྱང་། །ལྟ་བ་རྟོགས་པའི་གྲངས་སུ་འགྱུར། །
+    sample = '''གང་དྲན་ཆོས་སྐུར་ཤེས། །སྨིག་རྒྱུ་ནམ་མཁར་ཤེས་པ་འདྲ། །བརྟུལ་ཞགས་མཆོག་གི་སྤྱོད་པ་ནི། །མཚམས་མེད་ལྔ་དང་མི་དགེ་བཅུ། །ཆགས་སྡང་ལྔ་ལ་ལོངས་སྤྱད་ཀྱང་། །ལྟ་བ་རྟོགས་པའི་གྲངས་སུ་འགྱུར། །
 ལུང་རིགས་མི་འགལ་རྒྱུད་གནས་དང་། །འབོལ་ཞིང་ཞི་ལ་འཇམ་འདོད་པས། །ངེས་པའི་གདམས་ངག་མ་གོ་ན། །མཁས་ཀྱང་རྨོངས་པ་སྙིང་རེ་རྗེ། །དེ་ཡང་འདུས་པའི་སྙིང་པོ་ཧོན། །བགེཀོསས་མེད་ཡེ་ཤེས་རང་
 ཤར་བ། །རང་གི་རྣམ་རྟོག་ཡོད་ཀྱི་བར། །བགེགས་ཀྱི་མཐའ་ལ་ཟད་པ་མེད། །དངོས་སུ་མེད་ཕྱིར་འུབྱུལ་པའི་བློ། །མུ་སྟེགས་ཅན་ལ་འདྲེ་ཡོད་ཕྱིར། །འདྲེར་འཛིན་སྐྱེ་བོ་མ་རིག་པ། །མོ་མའ་རྫུན་གྱིས་གེན་པ་
 བསླུས། །དམ་པ་ཀུན་གྱིས་འདྲེ་སུན་བཏོན། །ཡུལ་དང་གོལ་ས་ཆོད་གྱུར་ན། །འདྲེ་མེད་རིག་པ་ཆོས་སྐུར་ཤེས། །ཏཞི་ལ་ལྷ་འདྲེ་མེད་རྟོགས་པས། །ཕན་གནོད་བྱ་བ་མིང་ཡང་མེད། །དེ་ཡང་འདུས་པའི་སྙིང་པོ་
@@ -236,12 +236,12 @@ if __name__ == '__main__':
  '''
     
     import pprint
-    sample = u'འཁོར་དང། འབྱེད་པ མི་མངའ་བའི་རང་བཞིན་གྱིས་ཐབས་ཅིག པར་བཞུགསསོ།  ཧཱུྃ །དེནས་བྱངཆུབ་ཀྱིསེམསཀུན་བྱེད་རྒྱལཔོདེས་འཁོར་ཐམསཅད་ཉིད་ཀྱིརང་བཞིན་དུབྱིན་གྱིསབརླབསཔའིཕྱིར'
+    sample = 'འཁོར་དང། འབྱེད་པ མི་མངའ་བའི་རང་བཞིན་གྱིས་ཐབས་ཅིག པར་བཞུགསསོ།  ཧཱུྃ །དེནས་བྱངཆུབ་ཀྱིསེམསཀུན་བྱེད་རྒྱལཔོདེས་འཁོར་ཐམསཅད་ཉིད་ཀྱིརང་བཞིན་དུབྱིན་གྱིསབརླབསཔའིཕྱིར'
     
     s = TextScores(sample, multiline=False)
-    print s
+    print(s)
 #    for k in s.__dict__.keys():
 #        print k, getattr(s, k)
-    for i in  s.invalid: print i, 'invalid'
+    for i in  s.invalid: print(i, 'invalid')
 #    pprint.pprint(get_text_scores(sample, multiline=True))
 #    print get_text_scores(sample)
