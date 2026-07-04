@@ -130,17 +130,13 @@ allchars = list(chain(everything, ['་','།'], num, wa_zur, roman_num, misc_gl
 
 allchars_label = list(zip(list(range(len(allchars))),allchars))
 #print len(allchars)
-import shelve
-
-## NORMAL DICT
-if platform.system() == "Windows":
-    s = shelve.open(r'..\allchars_dict2')
-else:
-    s = shelve.open('../allchars_dict2')
-
-s['allchars'] = dict((j,i) for i,j in allchars_label)
-s['label_chars'] = dict((i, j) for i,j in allchars_label)
-s.close()
+## NORMAL DICT — write the modern gzip+JSON char maps (data-only, not shelve/pickle)
+import sys as _sys, os as _os
+_root = _os.path.abspath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..'))
+_sys.path.insert(0, _root)
+from safe_model_io import dump_model
+dump_model(dict((j, i) for i, j in allchars_label), _os.path.join(_root, 'allchars.json.gz'))
+dump_model(dict((i, j) for i, j in allchars_label), _os.path.join(_root, 'label_chars.json.gz'))
 ####
 
 ### EXTENDED

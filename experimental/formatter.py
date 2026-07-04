@@ -1,6 +1,5 @@
 # encoding: utf-8
 
-import pickle as pickle
 import numpy as np
 from sklearn.mixture import GMM
 from collections import Counter

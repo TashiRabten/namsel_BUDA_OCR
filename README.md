@@ -134,8 +134,8 @@ The recognizer is trained from the Tibetan character datasets in `datasets/` —
 - `dataset.py` — dataset loading (`.npy`, data-only) and CPU-friendly augmentation
 - `model.py` — the CNN architecture
 - `predict.py` — inference (`TibetanCNNPredictor`)
-- `convert_datasets_to_npy.py` — one-time migration of legacy dataset pickles to `.npy`
 
+Datasets are stored as data-only NumPy `.npy` (label + 1024 pixels per sample).
 Training is GPU/Colab-friendly.
 
 ---
