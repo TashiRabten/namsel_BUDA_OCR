@@ -4,7 +4,6 @@ import os
 if os.name == 'nt' and 'LOKY_MAX_CPU_COUNT' not in os.environ:
     os.environ['LOKY_MAX_CPU_COUNT'] = str(max(1, (os.cpu_count() or 4) - 1))
 import numpy as np
-import pickle as pickle
 import joblib
 try:
     from .utils import local_file
@@ -104,7 +103,7 @@ class TrainingData(object):
     
     def patch_features(self):
         rg = list(range(0,33, 4))
-        km = pickle.load(open('patch_km.pkl', 'rb'))
+        km = joblib.load('patch_km.pkl')   # sklearn KMeans model, via joblib (not pickle)
 #        import Image
         chars = []
         for p, x in enumerate(self.x_train):
@@ -144,14 +143,11 @@ class TrainingData(object):
             unique_a = np.unique(a.view([('', a.dtype)]*a.shape[1]))
             return unique_a.view(a.dtype).reshape((unique_a.shape[0], a.shape[1]))
         
-        def load_pkl_data(pklfile):
+        def load_npy_data(npyfile):
             try:
-                return pickle.load(open(pklfile, 'rb'))
-            except UnicodeDecodeError:
-                # Try with latin-1 encoding for older pickle files
-                return pickle.load(open(pklfile, 'rb'), encoding='latin-1')
+                return np.load(npyfile, allow_pickle=False)   # data-only, not pickle
             except Exception as e:
-                print(f"Warning: Could not load {pklfile}: {e}")
+                print(f"Warning: Could not load {npyfile}: {e}")
                 return np.array([])
         
         if not core_smp_file:
@@ -170,20 +166,14 @@ class TrainingData(object):
 #        training5 = np.genfromtxt('/home/zr/home2/letters/phrinyik_labeled_samples_from_ui.csv', np.uint32, delimiter=',')
         ##########
          
-        if platform.system() == "Windows":
-            training_alt = np.load(r'datasets\normalized_3216_to_3232_training.npy')
-            
-            for pklfile in glob.glob(r'datasets\*pkl'):
-                lpk = load_pkl_data(pklfile)
-                print(np.array(lpk).shape, pklfile)
-                training = np.append(training, load_pkl_data(pklfile), axis=0)
-        else:
-            training_alt = np.load('datasets/normalized_3216_to_3232_training.npy')
-            
-            for pklfile in glob.glob('datasets/*pkl'):
-                lpk = load_pkl_data(pklfile)
-                print(np.array(lpk).shape, pklfile)
-                training = np.append(training, load_pkl_data(pklfile), axis=0)
+        training_alt = np.load(os.path.join('datasets', 'normalized_3216_to_3232_training.npy'))
+
+        for npyfile in glob.glob(os.path.join('datasets', '*.npy')):
+            if os.path.basename(npyfile) == 'normalized_3216_to_3232_training.npy':
+                continue   # loaded separately above
+            lpk = load_npy_data(npyfile)
+            print(np.array(lpk).shape, npyfile)
+            training = np.append(training, lpk, axis=0)
         
         training = np.append(training, training_tibchars, axis=0)
         training = np.append(training, training_alt, axis=0)
@@ -271,7 +261,7 @@ def rebuild_cls(pca_trans=False, rbf=True, logistic=True,
         x_train = pca.fit_transform(x_train, y_train)
         print(x_train.shape, 'is the new dimensionality')
         print('transforming...')
-        pickle.dump(pca, open(PCA_PICKLE,'wb'))
+        joblib.dump(pca, PCA_PICKLE)   # sklearn PCA model, via joblib (not pickle)
 
     if rbf: 
         clstype = 'rbf'
