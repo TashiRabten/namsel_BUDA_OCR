@@ -13,6 +13,23 @@ import cv2 as cv
 import numpy as np
 from scipy.stats import mode as statsmode
 from collections import OrderedDict
+from dataclasses import dataclass
+
+
+@dataclass
+class PageElementsOptions:
+    """Optional configuration for PageElements' first-pass segmentation.
+
+    Bundled into one object so PageElements.__init__ stays within the parameter
+    limit; every field keeps the historical default of the old keyword argument.
+    """
+    small_coef: int = 1          # lower coef means more filtering; USE 3 for nying gyud
+    low_ink: bool = False
+    page_type: str = None
+    flpath: str = None
+    detect_o: bool = True
+    clear_hr: bool = False
+    force_single_line: bool = False
 
 try:
     from .classify import load_cls
@@ -83,17 +100,15 @@ class PageElements(ScaleCalculator, ContourProcessor, LayoutDetector):
 
 #     @timeout(25)
 #     @profile
-    def __init__(self, img_arr, fast_cls, small_coef=1, low_ink=False, \
-                 page_type=None, flpath=None, detect_o=True,\
-                 clear_hr = False, use_ml_tsheg=False, ml_model_path=None, force_single_line=False): #lower coef means more filtering USE 3 for nying gyud
+    def __init__(self, img_arr, fast_cls, opts=None):
+        if opts is None:
+            opts = PageElementsOptions()
         self.img_arr = img_arr
-        self.page_type = page_type
-        self.flpath = flpath
-        self.low_ink = low_ink
-        self.detect_o = detect_o
-        self.force_single_line = force_single_line
-        self.use_ml_tsheg = use_ml_tsheg
-        self.ml_model_path = ml_model_path
+        self.page_type = opts.page_type
+        self.flpath = opts.flpath
+        self.low_ink = opts.low_ink
+        self.detect_o = opts.detect_o
+        self.force_single_line = opts.force_single_line
         self.cached_features = OrderedDict()
         self.cached_pred_prob = OrderedDict()
         # FIXED: Use RETR_EXTERNAL instead of RETR_TREE to match preliminary stage
@@ -113,7 +128,7 @@ class PageElements(ScaleCalculator, ContourProcessor, LayoutDetector):
 
         self.boxes = []
         self.indices = []
-        self.small_coef = small_coef
+        self.small_coef = opts.small_coef
         self.warning_count = 0  # guard against runaway processing
 
         self._set_shape_measurements()
@@ -125,8 +140,8 @@ class PageElements(ScaleCalculator, ContourProcessor, LayoutDetector):
         if hasattr(self, 'contours') and self.contours:
             self._analyze_document_type(self.contours)
 
-        content_parent = self._compute_content_parent(page_type, clear_hr)
-        outer_contours, outer_widths = self._select_outer_contours(content_parent, clear_hr)
+        content_parent = self._compute_content_parent(opts.page_type, opts.clear_hr)
+        outer_contours, outer_widths = self._select_outer_contours(content_parent, opts.clear_hr)
         self._set_width_measures(outer_widths)
 
         self.small_contour_indices = []

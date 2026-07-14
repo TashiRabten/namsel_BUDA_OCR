@@ -8,8 +8,10 @@ from sklearn.mixture import GaussianMixture as GMM
 
 try:
     from .config_manager import default_config
+    from .utils import adaptive_binary_inv
 except ImportError:
     from config_manager import default_config
+    from utils import adaptive_binary_inv
 
 
 class ScaleCalculator(object):
@@ -86,23 +88,13 @@ class ScaleCalculator(object):
         before full contour analysis. This enables proper scale-adaptive
         thresholding from the start.
         """
-        img_copy = self.img_arr.copy()
-        if img_copy.dtype == np.float64 and img_copy.max() <= 1.0:
-            img_copy = (img_copy * 255.0).round().astype(np.uint8)
-        elif img_copy.dtype != np.uint8:
-            img_copy = img_copy.astype(np.uint8)
-
         # Bootstrap scale from image height (paragraph2.png 106px works at scale 1.0),
         # then derive the same scale-adaptive odd block size + C as the main pipeline.
-        bootstrap_scale = max(0.5, min(3.0, img_copy.shape[0] / 106))
+        # (img height is conversion-invariant, so self.img_arr.shape[0] == the old
+        # img_copy.shape[0].)
+        bootstrap_scale = max(0.5, min(3.0, self.img_arr.shape[0] / 106))
         self.bootstrap_scale = bootstrap_scale
-        prelim_block_size = max(3, int(11 * bootstrap_scale))
-        prelim_c_param = max(1, int(3.5 * bootstrap_scale))
-        if prelim_block_size % 2 == 0:
-            prelim_block_size += 1
-
-        basic_binary = cv.adaptiveThreshold(img_copy, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                            cv.THRESH_BINARY_INV, prelim_block_size, prelim_c_param)
+        basic_binary = adaptive_binary_inv(self.img_arr, bootstrap_scale)
         result = cv.findContours(basic_binary, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
         contours = result[0] if len(result) == 2 else result[1]
 

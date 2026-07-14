@@ -1,12 +1,31 @@
 from numpy import vstack, hstack, ones
 import numpy as np
 from cv2 import findContours, boundingRect, RETR_TREE, CHAIN_APPROX_SIMPLE, resize, INTER_CUBIC
+from cv2 import adaptiveThreshold, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY_INV
 import os
 
 import uuid
 from secrets import choice
 
 interp = INTER_CUBIC
+
+
+def adaptive_binary_inv(img_arr, bootstrap_scale):
+    '''Precise float->uint8 conversion (the old plain cast merged tshegs into main
+    characters) + a scale-adaptive odd block size / C, then an inverted Gaussian
+    adaptive threshold. Shared by ContourProcessor._prep_binary and
+    ScaleCalculator's preliminary-scale bootstrap.'''
+    img_copy = img_arr.copy()
+    if img_copy.dtype == np.float64 and img_copy.max() <= 1.0:
+        img_copy = (img_copy * 255.0).round().astype(np.uint8)
+    elif img_copy.dtype != np.uint8:
+        img_copy = img_copy.astype(np.uint8)
+    block_size = max(3, int(11 * bootstrap_scale))
+    c_param = max(1, int(3.5 * bootstrap_scale))
+    if block_size % 2 == 0:
+        block_size += 1  # OpenCV requires an odd block size
+    return adaptiveThreshold(img_copy, 255, ADAPTIVE_THRESH_GAUSSIAN_C,
+                             THRESH_BINARY_INV, block_size, c_param)
 
 urlsafechars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
 def random_seq(length=15):
@@ -177,11 +196,14 @@ def local_file(local_file_name):
 def invert_bw(arr):
     '''
     Invert black and white
-     
+
     '''
     arr = arr.copy()
-     
-    return ((arr*-1)+1).astype(np.uint8)
+
+    # `1 - arr` instead of `arr*-1 + 1`: identical for a 0/1 or 0..1 image, but
+    # `arr*-1` raises OverflowError on numpy >= 2.0 when arr is a uint8 array
+    # (the scalar -1 is out of uint8 range).
+    return (1 - arr).astype(np.uint8)
 
 def create_unique_id():
     return str(uuid.uuid4())

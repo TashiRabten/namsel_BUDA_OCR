@@ -289,6 +289,19 @@ class LineCluster(object):
         self.k = k
         self.page_array = shapes.img_arr
 
+        kmeans, lines, sort_inx, boxes = self._cluster_lines(shapes, k, KMeans)
+        breaklines, topmosts = self._compute_breaklines(lines, boxes)
+        self.baselines = self._compute_baselines(breaklines)
+        self.lines_chars = self._split_lines_across_breaklines(shapes, lines, breaklines, topmosts, boxes)
+        self._assign_small_contours(breaklines)
+        self._assign_emph_symbols(kmeans, sort_inx, k)
+        if self.shapes.detect_o:
+            self._assign_naros(breaklines)
+        if self.shapes.low_ink:
+            self._assign_low_ink(breaklines)
+
+    def _cluster_tops(self, shapes):
+        """The (n,1) array of char-top y-coordinates to cluster, per line_cluster_pos."""
         if shapes.conf['line_cluster_pos'] == 'top':
             tops = array(shapes.get_tops(), dtype=float64)
         elif shapes.conf['line_cluster_pos'] == 'center':
@@ -298,51 +311,38 @@ class LineCluster(object):
                          )
         else:
             raise ValueError("The line_cluster_pos argument must be either 'top' or 'center'")
-
         tops.shape = (len(tops), 1)
-        
+        return tops
+
+    def _cluster_lines(self, shapes, k, KMeans):
+        """KMeans-cluster the char tops into k lines, drop empty clusters, and sort
+        lines top-to-bottom. Returns (kmeans, lines, sort_inx, boxes)."""
+        tops = self._cluster_tops(shapes)
         kmeans = KMeans(n_clusters=k)
-#         print tops
         kmeans.fit(tops)
-        
-        
-        ################## 
-        ######## mark cluster centroids on original image and show them
-#        img_arr = shapes.img_arr.copy()
-#        for centroid in kmeans.cluster_centers_:
-##            print centroid[0]
-#            img_arr[centroid[0],:] = 0
-#            
-#        import Image
-#        Image.fromarray(img_arr*255).show()
-        #######################3
-        
+
         lines = [[] for i in range(k)]
-        
         ind = shapes.get_indices()
-        
         ### Assign char pointers (ind) to the appropriate line ###
-#        [lines[kmeans.labels_[i]].append(ind[i]) for i in range(len(ind))]
         [lines[kmeans.predict([[shapes.get_boxes()[ind[i]][1]]])[0]].append(ind[i]) for i in range(len(ind))]
         lines = [l for l in lines if l]
         self.k = len(lines)
         boxes = shapes.get_boxes()
-        
-        
+
         ### Sort indices so they are in order from top to bottom using y from the first box in each line
-        
         sort_inx = list(argsort([boxes[line[0]][1] for line in lines]))
         lines.sort(key=lambda line: boxes[line[0]][1])
-        
-        ### Get breaklines for splitting up lines
-        ### Uses the topmost box in each line cluster to determine breakline
-        
+        return kmeans, lines, sort_inx, boxes
+
+    def _compute_breaklines(self, lines, boxes):
+        """Breaklines that split the page into line bands, from the topmost box in
+        each cluster (snapped to the nearest ink peak). Returns (breaklines, topmosts)."""
         try:
             topmosts = [min([boxes[i][1] for i in line]) for line in lines]
         except ValueError:
             print('failed to get topmosts...')
             raise
-        
+
         vsums = self.page_array.sum(axis=1)
         breaklines = []
         delta = 25
@@ -356,221 +356,198 @@ class LineCluster(object):
             if c < 0:
                 c = 0
             breaklines.append(c)
-    
+
         breaklines.append(self.page_array.shape[0])
-        self.baselines = []
-        
+        return breaklines, topmosts
+
+    def _compute_baselines(self, breaklines):
+        """Per-line baseline = the min-ink row within each breakline band."""
+        vsums = self.page_array.sum(axis=1)
+        baselines = []
         for i, br in enumerate(breaklines[:-1]):
-            
             try:
                 baseline_area = vsums[br:breaklines[i+1]]
                 if baseline_area.any():
-                    self.baselines.append(br + argmin(baseline_area))
+                    baselines.append(br + argmin(baseline_area))
                 else:
                     print(i)
                     print('No baseline info')
             except ValueError:
                 print('ValueError. exiting...HERE')
                 import traceback;traceback.print_exc()
-                
                 raise
+        return baselines
 
+    def _split_lines_across_breaklines(self, shapes, lines, breaklines, topmosts, boxes):
+        """Assign each char to its line, splitting a char that extends over a
+        breakline (a tall box crossing into the next line) into top/bottom pieces."""
         final_ind = dict((i, []) for i in range(len(lines)))
         self.new_contours = {}
         for j, br in enumerate(breaklines[1:-1]):
             topcount = 0
             bottomcount = 0
             for i in lines[j]:
-                # if char extends into next line, break it
-                # 253 is roughly global line height avg + 1 std
-                # The following lines says that a box/char must be extending over 
-                # breakline by a non trivial amount eg. 30 px and must itself
-                # be a tall-ish box (roughly the height of average line) in order
-                # for it to be broken. 
-    #            if (bounding[i][1] + bounding[i][3]) - br >= 30 and bounding[i][3] > 205:
+                # A box/char must extend over the breakline by a non-trivial amount
+                # (>= 30px) AND itself be tall-ish (~ a full line) to be broken.
                 if (boxes[i][1] + boxes[i][3]) - br >= 30 and \
                     (boxes[i][1] + boxes[i][3]) - topmosts[j] > self.shapes.char_mean*2.85:
-                    chars = ones((boxes[i][3]+2, boxes[i][2]+2), dtype=uint8)
-                    contours = shapes.contours
-                    cv.drawContours(chars, [contours[i]], -1,0, \
-                        thickness = -1, offset=(-boxes[i][0]+1,-boxes[i][1]+1))
-                    cv.dilate(chars, None, chars)
-                    y_offset = boxes[i][1]
-                    new_br = br - y_offset
-                    prd_cut = []
-
-                    ### Iterate through potential cut-points and 
-                    ### and cut where top half has the highest probability
-                    ### that is not a tsek
-#                     print 'bottom bound cut point', int(.75*shapes.tsek_mean)
-                    # Use scale-normalized tsek_mean for character splitting
-                    # Reference: paragraph2.png has tsek_mean ≈ 4.14
-                    reference_tsek_mean = 4.14
-                    scale_factor = getattr(shapes, 'global_scale_factor', shapes.tsek_mean / reference_tsek_mean)
-                    normalized_tsek_mean = reference_tsek_mean * scale_factor
-                    
-                    for delta in range(-3, int(.75*normalized_tsek_mean), 1):
-#                     for delta in range(-3, 100, 1):
-                        cut_point = new_br + delta
-#                        chars[cut_point, :] = 0
-#                        import Image
-#                        Image.fromarray(chars*255).show()
-                        tchr = chars[:cut_point,:]
-                        tchr = ftrim(tchr)
-                        if not tchr.any():
-                            continue
-                        tchr = normalize_and_extract_features(tchr)
-                        probs = cls.predict_proba(tchr)
-                        max_prob_ind = argmax(probs)
-                        chr = label_chars[max_prob_ind]
-                        prd_cut.append((probs[0,max_prob_ind], chr, cut_point))
-                    
-                    prd_cut = [q for q in prd_cut if q[1] != '་']
-                    try:
-                        cut_point = max(prd_cut)[-1]
-                    except:
-                        print('No max prob for vertical char break, using default breakline. Usually this means the top half of the attempted segmentation looks like a tsek blob')
-                        cut_point = br-boxes[i][1]
-
-                    #######FOLLWNG NOT WORKING ATTEMPTS TO GET A BETTER BREAK LINE
-    #                br2 = br-bounding[i][1]
-    #                
-    #                csum = chars.sum(axis=1)
-    #                bzone = csum[br2-25:br2+40]
-    #                if bzone.any():
-    #                    br2 = np.argmax(bzone) + (br-25)
-    ##                    print br, 'br'
-    #                chars = chars*255
-    #                nbr = br
-    #                cv.line(chars, (0, br2), (chars.shape[1], br2), 0)
-    #                Image.fromarray(chars).save('/tmp/outt.tiff')
-    #                sys.exit()
-                    #############
-                    
-                    tarr = chars[:cut_point,:]
-                    tarr, top_offset = ftrim(tarr, new_offset=True)
-                    tarr = fadd_padding(tarr, 3)
-                    barr = chars[cut_point:,:]
-                    barr = ftrim(barr, sides='brt') 
-                    barr = fadd_padding(barr, 3)
-                    
-                    # Handle different OpenCV versions that return different numbers of values
-                    contour_result = cv.findContours(image=tarr, mode=cv.RETR_TREE, method=cv.CHAIN_APPROX_SIMPLE, offset=(boxes[i][0]+top_offset['left'],boxes[i][1]))
-                    if len(contour_result) == 2:
-                        c1, h = contour_result
-                    else:
-                        _, c1, h = contour_result
-
-                    c1 = c1[argmax([len(t) for t in c1])] # use the most complex contour
-
-                    bnc1 = cv.boundingRect(c1)
-
-                    # Handle different OpenCV versions that return different numbers of values
-                    contour_result2 = cv.findContours(barr, mode=cv.RETR_TREE,
-                                            method=cv.CHAIN_APPROX_SIMPLE,
-                                            offset=(boxes[i][0]-3,boxes[i][1]+cut_point-3))
-                    if len(contour_result2) == 2:
-                        c2, h = contour_result2
-                    else:
-                        _, c2, h = contour_result2
-
-                    c2 = c2[argmax([len(t) for t in c2])]
-                    bnc2 = cv.boundingRect(c2)
-
-                    topbox_name = 't%d_%d' % (j, topcount)
-                    final_ind[j].append(topbox_name)
-                    self.new_contours[topbox_name] = (bnc1, c1)
-                    topcount += 1
-                    
-                    if bnc2[-1] > 8: #only add bottom contour if not trivially small
-                        bottombox_name = 'b%d_%d' % (j, bottomcount)
-                        final_ind[j+1].append(bottombox_name)
-                        self.new_contours[bottombox_name] = (bnc2, c2)
-                        bottomcount += 1
-                    
+                    topcount, bottomcount = self._split_extending_char(
+                        shapes, boxes, i, j, br, final_ind, topcount, bottomcount)
                 else:
                     final_ind[j].append(i)
-            # Don't forget to include the last line
+        # Don't forget to include the last line
         list(map(final_ind[len(lines)-1].append, lines[len(lines)-1]))
-        
-        self.lines_chars = final_ind
-        
+        return final_ind
+
+    def _split_extending_char(self, shapes, boxes, i, j, br, final_ind, topcount, bottomcount):
+        """Rasterize char i, find its top/bottom cut-point, and register the two
+        resulting contours under 't{j}_{n}' / 'b{j}_{n}' names. Returns the updated
+        (topcount, bottomcount)."""
+        chars = ones((boxes[i][3]+2, boxes[i][2]+2), dtype=uint8)
+        contours = shapes.contours
+        cv.drawContours(chars, [contours[i]], -1, 0,
+            thickness=-1, offset=(-boxes[i][0]+1, -boxes[i][1]+1))
+        cv.dilate(chars, None, chars)
+        y_offset = boxes[i][1]
+        new_br = br - y_offset
+        cut_point = self._find_char_cut_point(shapes, chars, new_br, br, boxes, i)
+        c1, bnc1, c2, bnc2 = self._extract_split_contours(chars, cut_point, boxes, i)
+
+        topbox_name = 't%d_%d' % (j, topcount)
+        final_ind[j].append(topbox_name)
+        self.new_contours[topbox_name] = (bnc1, c1)
+        topcount += 1
+
+        if bnc2[-1] > 8:  # only add bottom contour if not trivially small
+            bottombox_name = 'b%d_%d' % (j, bottomcount)
+            final_ind[j+1].append(bottombox_name)
+            self.new_contours[bottombox_name] = (bnc2, c2)
+            bottomcount += 1
+        return topcount, bottomcount
+
+    def _find_char_cut_point(self, shapes, chars, new_br, br, boxes, i):
+        """Scan candidate cut-points around the breakline and pick the one whose
+        top half classifies (non-tsek) with the highest probability."""
+        prd_cut = []
+        # Use scale-normalized tsek_mean (paragraph2.png has tsek_mean ~ 4.14).
+        reference_tsek_mean = 4.14
+        scale_factor = getattr(shapes, 'global_scale_factor', shapes.tsek_mean / reference_tsek_mean)
+        normalized_tsek_mean = reference_tsek_mean * scale_factor
+
+        for delta in range(-3, int(.75*normalized_tsek_mean), 1):
+            cut_point = new_br + delta
+            tchr = chars[:cut_point,:]
+            tchr = ftrim(tchr)
+            if not tchr.any():
+                continue
+            tchr = normalize_and_extract_features(tchr)
+            # sklearn >= 1.0 requires a 2D (1, n_features) sample;
+            # probs[0, ...] below already assumes the 2D result.
+            probs = cls.predict_proba(tchr.reshape(1, -1))
+            max_prob_ind = argmax(probs)
+            chr = label_chars[max_prob_ind]
+            prd_cut.append((probs[0,max_prob_ind], chr, cut_point))
+
+        prd_cut = [q for q in prd_cut if q[1] != '་']
+        try:
+            return max(prd_cut)[-1]
+        except:
+            print('No max prob for vertical char break, using default breakline. Usually this means the top half of the attempted segmentation looks like a tsek blob')
+            return br-boxes[i][1]
+
+    def _extract_split_contours(self, chars, cut_point, boxes, i):
+        """Contour + bounding box for the top and bottom halves of a char split at
+        cut_point. Returns (c1, bnc1, c2, bnc2)."""
+        tarr = chars[:cut_point,:]
+        tarr, top_offset = ftrim(tarr, new_offset=True)
+        tarr = fadd_padding(tarr, 3)
+        barr = chars[cut_point:,:]
+        barr = ftrim(barr, sides='brt')
+        barr = fadd_padding(barr, 3)
+
+        # Handle different OpenCV versions that return different numbers of values
+        contour_result = cv.findContours(image=tarr, mode=cv.RETR_TREE, method=cv.CHAIN_APPROX_SIMPLE, offset=(boxes[i][0]+top_offset['left'],boxes[i][1]))
+        if len(contour_result) == 2:
+            c1, h = contour_result
+        else:
+            _, c1, h = contour_result
+
+        c1 = c1[argmax([len(t) for t in c1])]  # use the most complex contour
+        bnc1 = cv.boundingRect(c1)
+
+        # Handle different OpenCV versions that return different numbers of values
+        contour_result2 = cv.findContours(barr, mode=cv.RETR_TREE,
+                                method=cv.CHAIN_APPROX_SIMPLE,
+                                offset=(boxes[i][0]-3,boxes[i][1]+cut_point-3))
+        if len(contour_result2) == 2:
+            c2, h = contour_result2
+        else:
+            _, c2, h = contour_result2
+
+        c2 = c2[argmax([len(t) for t in c2])]
+        bnc2 = cv.boundingRect(c2)
+        return c1, bnc1, c2, bnc2
+
+    def _lines_from_breaklines(self, sorted_indices, char_tops, breaklines):
+        """Split sorted_indices into per-breakline groups via bisect on char_tops."""
+        _line_insert_indxs = [bisect_right(char_tops, (i - 1,)) for i in breaklines]
+        if not _line_insert_indxs:
+            sys.exit()
+        grouped = []
+        for i, l in enumerate(_line_insert_indxs[:-1]):
+            grouped.append(sorted_indices[l:_line_insert_indxs[i+1]])
+        grouped.append(sorted_indices[_line_insert_indxs[-1]:])
+        return grouped
+
+    def _keep_nonempty_lines(self, grouped):
+        """Keep only the groups whose corresponding line has chars."""
+        return [grouped[i] for i in range(len(self.lines_chars)) if self.lines_chars[i]]
+
+    def _assign_small_contours(self, breaklines):
+        """Distribute the small connected components across lines."""
         cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.small_contour_indices]
         char_tops = list(zip(cctops, self.shapes.small_contour_indices))
         char_tops.sort(key=lambda x: x[0])
         sorted_indices = [i[1] for i in char_tops]
-        _line_insert_indxs = []
-        _line_insert_indxs.extend([bisect_right(char_tops, (i - 1,))
-                                   for i in breaklines])
-        self.small_cc_lines_chars = []
-        if not _line_insert_indxs: sys.exit()
+        grouped = self._lines_from_breaklines(sorted_indices, char_tops, breaklines)
+        self.small_cc_lines_chars = self._keep_nonempty_lines(grouped)
 
-        for i, l in enumerate(_line_insert_indxs[:-1]):
-            self.small_cc_lines_chars.append(sorted_indices[l:_line_insert_indxs[i+1]])
-        
-        self.small_cc_lines_chars.append(sorted_indices[_line_insert_indxs[-1]:])
-        
-        self.small_cc_lines_chars = [self.small_cc_lines_chars[i] for i in range(len(self.lines_chars)) if self.lines_chars[i]]
-       
+    def _assign_emph_symbols(self, kmeans, sort_inx, k):
+        """Distribute emphasis symbols across lines by their KMeans cluster."""
         cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.emph_symbols]
         char_tops = list(zip(cctops, self.shapes.emph_symbols))
         char_tops.sort(key=lambda x: x[0])
-
-        empred = [kmeans.predict(shapes.get_boxes()[i][1])[0] for i in self.shapes.emph_symbols]
-        
+        empred = [kmeans.predict(self.shapes.get_boxes()[i][1])[0] for i in self.shapes.emph_symbols]
         self.emph_lines = [[] for i in range(k)]
         for nn, e in enumerate(empred):
             self.emph_lines[sort_inx.index(e)].append(self.shapes.emph_symbols[nn])
-        
-    
-        if self.shapes.detect_o:
-            cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.naros]
-            char_tops = list(zip(cctops, self.shapes.naros))
-            char_tops.sort(key=lambda x: x[0])
-            sorted_indices = [i[1] for i in char_tops]
-            _line_insert_indxs = []
-            _line_insert_indxs.extend([bisect_right(char_tops, (i - 1,))
-                                       for i in breaklines])
-            
-            if not _line_insert_indxs: sys.exit()
-            
-            self.line_naros = []
-            for i, l in enumerate(_line_insert_indxs[:-1]):
-    #   
-                self.line_naros.append(sorted_indices[l:_line_insert_indxs[i+1]])
-            
-            self.line_naros.append(sorted_indices[_line_insert_indxs[-1]:])
-            
-            self.line_naros  = [self.line_naros[i] for i in range(len(self.lines_chars)) if self.lines_chars[i]]
-            self.line_naro_spans = []
-            for ll, mm in enumerate(self.line_naros):
-                thisline = []
-                for nn, naro in enumerate(mm):
-                    box = self.get_box(naro)
-                    thisline.append(box)
-                thisline.sort(key=lambda x: x[0])
-                self.line_naros[ll].sort(key=lambda x: self.get_box(x)[0])
-                self.line_naro_spans.append(thisline)
-    
-        if self.shapes.low_ink:
-            
-            cctops = [lib[1] for lib in self.shapes.low_ink_boxes]
-            char_tops = list(zip(cctops, self.shapes.low_ink_boxes))
-            char_tops.sort(key=lambda x: x[0])
-            sorted_indices = [i[1] for i in char_tops]
-            _line_insert_indxs = []
-            _line_insert_indxs.extend([bisect_right(char_tops, (i - 1,))
-                                       for i in breaklines])
-            
-            self.low_ink_boxes = []
-            if not _line_insert_indxs: sys.exit()
-    
-            for i, l in enumerate(_line_insert_indxs[:-1]):
-                self.low_ink_boxes.append(sorted_indices[l:_line_insert_indxs[i+1]])
-            
-            self.low_ink_boxes.append(sorted_indices[_line_insert_indxs[-1]:])
-            
-            self.low_ink_boxes = [self.low_ink_boxes[i] for i in range(len(self.lines_chars)) if self.lines_chars[i]]
+
+    def _assign_naros(self, breaklines):
+        """Distribute naro vowels across lines + record their box spans."""
+        cctops = [self.shapes.get_boxes()[i][1] for i in self.shapes.naros]
+        char_tops = list(zip(cctops, self.shapes.naros))
+        char_tops.sort(key=lambda x: x[0])
+        sorted_indices = [i[1] for i in char_tops]
+        self.line_naros = self._keep_nonempty_lines(
+            self._lines_from_breaklines(sorted_indices, char_tops, breaklines))
+        self.line_naro_spans = []
+        for ll, mm in enumerate(self.line_naros):
+            thisline = []
+            for nn, naro in enumerate(mm):
+                box = self.get_box(naro)
+                thisline.append(box)
+            thisline.sort(key=lambda x: x[0])
+            self.line_naros[ll].sort(key=lambda x: self.get_box(x)[0])
+            self.line_naro_spans.append(thisline)
+
+    def _assign_low_ink(self, breaklines):
+        """Distribute low-ink boxes across lines."""
+        cctops = [lib[1] for lib in self.shapes.low_ink_boxes]
+        char_tops = list(zip(cctops, self.shapes.low_ink_boxes))
+        char_tops.sort(key=lambda x: x[0])
+        sorted_indices = [i[1] for i in char_tops]
+        self.low_ink_boxes = self._keep_nonempty_lines(
+            self._lines_from_breaklines(sorted_indices, char_tops, breaklines))
 
     def check_naro_overlap(self, line_num, box):
         line = self.line_naro_spans[line_num]

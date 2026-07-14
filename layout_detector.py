@@ -21,8 +21,42 @@ except ImportError:
 from scipy.ndimage.interpolation import rotate
 
 
+# ── Pure geometry helpers for set_pecha_layout (module-level; no self state) ──
+
+def _angle_cos(p0, p1, p2):
+    d1, d2 = (p0 - p1).astype('float'), (p2 - p1).astype('float')
+    return abs(np.dot(d1, d2) / np.sqrt(np.dot(d1, d1) * np.dot(d2, d2)))
+
+
+def _get_edges(b):
+    return (b[0], b[0] + b[2], b[1], b[1] + b[3])
+
+
+def _bid(b):
+    return '%d-%d-%d-%d' % (b[0], b[1], b[2], b[3])
+
+
+def _b_contains_nb(b, nb):
+    l1, r1, t1, b1 = _get_edges(b)
+    l2, r2, t2, b2 = _get_edges(nb)
+    return l1 <= l2 and r2 <= r1 and t1 <= t2 and b1 >= b2
+
+
+def _qualified_box_rank(tree, bx):
+    '''Rank helper for picking the main content box: ignore boxes that contain
+    other boxes (return -1) so the innermost box with the most chars wins.'''
+    if tree[bx]['num_boxes'] == 0:
+        return tree[bx]['num_chars']
+    return -1
+
+
 class LayoutDetector(object):
     """Mixin class providing layout detection methods for PageElements."""
+
+    # Attributes provided by the host class (PageElements.__init__ sets these);
+    # declared here to make the mixin contract explicit.
+    img_arr: np.ndarray
+    flpath: str
 
     def get_tops(self):
         return [self.get_boxes()[i][1] for i in self.get_indices()]
@@ -52,7 +86,10 @@ class LayoutDetector(object):
 
         cbx, cby, cbw, cbh = content_box_dict['b']
 
-        cbox_arr = np.ones((cbh, cbw), dtype=self.img_arr.dtype)
+        # to255() (Cython) requires a uint8 buffer; this scratch array only ever
+        # holds 0/1 mask values, so pin it to uint8 rather than inheriting a float
+        # img_arr dtype (which raised "Buffer dtype mismatch" in to255).
+        cbox_arr = np.ones((cbh, cbw), dtype=np.uint8)
 
         cv.drawContours(cbox_arr, [self.contours[i] for i in self._line_char_indices(content_box_dict)],
                         -1, 0, thickness=-1, offset=(-cbx, -cby))
@@ -88,9 +125,21 @@ class LayoutDetector(object):
         self.num_lines = len(mins)
 
     def draw_hough_outline(self, arr):
-
-        arr = invert_bw(arr)
-        h = cv.HoughLinesP(arr, 2, np.pi/4, 1, minLineLength=arr.shape[0]*.15, maxLineGap=5) #This
+        # Detect frame/margin lines on an ink=1 mask (invert_bw), then blank the
+        # corresponding margin regions to background in a COPY OF THE ORIGINAL
+        # image, preserving arr's dtype/scale.
+        #
+        # The old code ran the whole routine on invert_bw(arr) and returned that
+        # `(1 - mask)` uint8 array. For namsel's float [0,1] img_arr, invert_bw
+        # truncates to a uint8 {0,1} mask, and the downstream adaptiveThreshold in
+        # _prep_binary (which only rescales float inputs to 0..255) then read {0,1}
+        # as all-background -> 0 contours -> the entire pecha/line_cluster path
+        # silently produced nothing. Blanking the original in place keeps the
+        # float scale intact so contour detection works.
+        result = arr.copy()
+        bg = arr.max()
+        inv = invert_bw(arr)
+        h = cv.HoughLinesP(inv, 2, np.pi/4, 1, minLineLength=inv.shape[0]*.15, maxLineGap=5)
         PI_O4 = np.pi/4
         if h is not None:
             for line in h[0]:
@@ -99,17 +148,16 @@ class LayoutDetector(object):
                 theta = np.arccos(val)
                 if theta >= PI_O4: # Vertical line
                     if line[0] < .5*arr.shape[1]:
-                        arr[:,:line[0]+12] = 0
+                        result[:,:line[0]+12] = bg
                     else:
-                        arr[:,line[0]-12:] = 0
+                        result[:,line[0]-12:] = bg
                 else: # horizontal line
                     if line[2] - line[0] >= .15 * arr.shape[1]:
                         if line[1] < .5 *arr.shape[0]:
-                            arr[:line[1]+17, :] = 0
+                            result[:line[1]+17, :] = bg
                         else:
-                            arr[line[1]-5:,:] = 0
-
-        return ((arr*-1)+1).astype(np.uint8)
+                            result[line[1]-5:,:] = bg
+        return result
 
     def save_margin_content(self, tree, content_box):
         '''Look at margin content and try to OCR it. Save results in a JSON file
@@ -152,26 +200,44 @@ class LayoutDetector(object):
         json.dump({'right': right_content, 'left': left_content}, open(outname, 'w', encoding='utf-8'), ensure_ascii=False)
 
     def set_pecha_layout(self):
-        a = self.img_arr.copy()
+        a = self._prepare_pecha_image()
+        a_binary = self._binarize_for_contours(a)
+        border_boxes = self._detect_border_boxes(a_binary)
+        tree = self._build_border_tree(border_boxes)
+        self._assign_chars_to_tree(tree)
 
+        if not tree:
+            # No rectangular pecha border frame was detected (e.g. a plain text
+            # crop with no surrounding box). Fall back to treating the whole page
+            # as the content region instead of crashing on max([]). This branch is
+            # a no-op for genuine framed pechas, where 'tree' is non-empty.
+            self._set_whole_page_content()
+            return
+
+        content_box = max(tree, key=lambda bx: _qualified_box_rank(tree, bx))
+        self.indices = [i for i in tree[content_box]['chars'] if self.boxes[i][2] >= 7]
+        self.detect_num_lines(tree[content_box])
+
+    def _prepare_pecha_image(self):
+        """Re-detect pecha/book by aspect ratio, draw the hough frame outline for
+        pechas, then commit the working array + refresh shapes. Returns the array."""
+        a = self.img_arr.copy()
         if self.img_arr.shape[1] > 2*self.img_arr.shape[0]:
             self._page_type = 'pecha'
         else:
             self._page_type = 'book'
-
-        if self._page_type == 'pecha': # Page is pecha format
+        if self._page_type == 'pecha':  # Page is pecha format
             a = self.draw_hough_outline(a)
-
         self.img_arr = a.copy()
         self.update_shapes()
+        return a
 
-        # Ensure proper binarization before contour detection
+    def _binarize_for_contours(self, a):
+        """Ensure a uint8 binary image (black text -> white) for contour detection."""
         if default_config.get('debug_output', False):
             print(f"[CONTOUR_DEBUG] Image shape: {a.shape}, dtype: {a.dtype}, mean: {a.mean():.1f}")
         if a.dtype != np.uint8:
             a = a.astype(np.uint8)
-
-        # Threshold the image to create binary image for contour detection
         if a.mean() > 127:  # White background - invert for black text on white
             _, a_binary = cv.threshold(a, 127, 255, cv.THRESH_BINARY_INV)
             if default_config.get('debug_output', False):
@@ -180,97 +246,65 @@ class LayoutDetector(object):
             _, a_binary = cv.threshold(a, 127, 255, cv.THRESH_BINARY)
             if default_config.get('debug_output', False):
                 print("[CONTOUR_DEBUG] Applied THRESH_BINARY")
-
         if default_config.get('debug_output', False):
             print(f"[CONTOUR_DEBUG] Binary image unique values: {np.unique(a_binary)}")
+        return a_binary
 
+    def _detect_border_boxes(self, a_binary):
+        """Find the rectangular (4-corner, convex, right-angled) contours that make
+        up the pecha border frame; return their bounding boxes sorted by (x, y).
+        Logic adapted from the squares.py OpenCV sample."""
         # OpenCV version-agnostic approach
         contours_result = cv.findContours(a_binary, mode=cv.RETR_TREE, method=cv.CHAIN_APPROX_SIMPLE)
-        contours, hierarchy = contours_result[-2:]  # Get last 2 values regardless of OpenCV version
-
-        ## Most of this logic for identifying rectangles comes from the
-        ## squares.py sample in opencv source code.
-        def angle_cos(p0, p1, p2):
-            d1, d2 = (p0-p1).astype('float'), (p2-p1).astype('float')
-            return abs( np.dot(d1, d2) / np.sqrt( np.dot(d1, d1)*np.dot(d2, d2) ) )
-
+        contours, _hierarchy = contours_result[-2:]  # last 2 values regardless of OpenCV version
         border_boxes = []
-
-        for j,cnt in enumerate(contours):
+        for cnt in contours:
             cnt_len = cv.arcLength(cnt, True)
             orig_cnt = cnt.copy()
             cnt = cv.approxPolyDP(cnt, 0.02*cnt_len, True)
             if len(cnt) == 4 and cv.contourArea(cnt) > 1000 and cv.isContourConvex(cnt):
                 cnt = cnt.reshape(-1, 2)
-                max_cos = np.max([angle_cos(cnt[i],
-                                            cnt[(i+1) % 4], cnt[(i+2) % 4] )
+                max_cos = np.max([_angle_cos(cnt[i], cnt[(i+1) % 4], cnt[(i+2) % 4])
                                   for i in range(4)])
                 if max_cos < 0.1:
-                    b = cv.boundingRect(orig_cnt)
-                    x,y,w,h = b
-                    border_boxes.append(b)
+                    border_boxes.append(cv.boundingRect(orig_cnt))
+        border_boxes.sort(key=lambda b: (b[0], b[1]))
+        return border_boxes
 
-        border_boxes.sort(key=lambda b: (b[0],b[1]))
-
-        def get_edges(b):
-            l = b[0]
-            r = b[0] + b[2]
-            t = b[1]
-            b = b[1] + b[3]
-            return (l,r,t,b)
-
-        def bid(b):
-            return '%d-%d-%d-%d' % (b[0],b[1],b[2],b[3])
-
+    def _build_border_tree(self, border_boxes):
+        """Build the containment tree of border boxes (which box contains which),
+        stamping the top edge of each frame into img_arr along the way."""
         tree = {}
         for b in border_boxes:
-            tree[bid(b)] = {'chars':[], 'b':b, 'boxes':[], 'num_boxes':0, 'num_chars':0}
-
-        def b_contains_nb(b,nb):
-            l1,r1,t1,b1 = get_edges(b)
-            l2,r2,t2,b2 = get_edges(nb)
-            return l1 <= l2 and r2 <= r1 and t1 <= t2 and b1 >= b2
-
+            tree[_bid(b)] = {'chars': [], 'b': b, 'boxes': [], 'num_boxes': 0, 'num_chars': 0}
         for i, b in enumerate(border_boxes):
-            bx,by,bw,bh = b
-            self.img_arr[by:by+1,bx+3:bx+bw-3] = 1
-
+            bx, by, bw, bh = b
+            self.img_arr[by:by+1, bx+3:bx+bw-3] = 1
             if platform.system() == "Linux":
-                self.img_arr[by+bh,by+bh-1:bx+3:bx+bw-3] = 1
-
+                self.img_arr[by+bh, by+bh-1:bx+3:bx+bw-3] = 1
             for nb in border_boxes[i+1:]:
-                if b_contains_nb(b, nb):
-                    tree[bid(b)]['boxes'].append(bid(nb))
-                    tree[bid(b)]['num_boxes'] = len(tree[bid(b)]['boxes'])
-
+                if _b_contains_nb(b, nb):
+                    tree[_bid(b)]['boxes'].append(_bid(nb))
+                    tree[_bid(b)]['num_boxes'] = len(tree[_bid(b)]['boxes'])
         self.update_shapes()
+        return tree
 
+    def _assign_chars_to_tree(self, tree):
+        """Assign each char index to the innermost border box that contains it."""
         tree_keys = list(tree.keys())
         tree_keys.sort(key=lambda x: tree[x]['num_boxes'])
-
-        ## Assign contours to boxes
         for i in self.get_indices():
             for k in tree_keys:
-                box = tree[k]
-                b = box['b']
-
                 char_box = self.get_boxes()[i]
-                if b_contains_nb(b, char_box):
+                if _b_contains_nb(tree[k]['b'], char_box):
                     tree[k]['chars'].append(i)
                     tree[k]['num_chars'] = len(tree[k]['chars'])
                     break
 
-        def qualified_box(bx):
-            '''Helper function that ignores boxes that contain other boxes.
-            This is useful for finding the main content box which should
-            be among the innermost boxes that have no box children '''
-
-            if tree[bx]['num_boxes'] == 0:
-                return tree[bx]['num_chars']
-            else:
-                return -1
-
-        content_box = max(tree, key=qualified_box)
-        self.indices = [i for i in tree[content_box]['chars'] if self.boxes[i][2] >= 7]
-
-        self.detect_num_lines(tree[content_box])
+    def _set_whole_page_content(self):
+        """Frameless-page fallback: treat the whole page as the content box."""
+        all_chars = list(self.get_indices())
+        whole_page = {'chars': all_chars, 'b': (0, 0, self.img_arr.shape[1], self.img_arr.shape[0]),
+                      'boxes': [], 'num_boxes': 0, 'num_chars': len(all_chars)}
+        self.indices = [i for i in all_chars if self.boxes[i][2] >= 7]
+        self.detect_num_lines(whole_page)

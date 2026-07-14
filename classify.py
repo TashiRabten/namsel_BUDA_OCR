@@ -296,6 +296,36 @@ def load_cls(name):
         return LogisticRegression()
 
 
+def load_cnn_predictor(module_label):
+    """Resolve the bundled namsel_BUDA_OCR CNN model paths (the engine may sit at
+    the repo root ./namsel_BUDA_OCR or in a namsel_ocr/ subpackage
+    ../namsel_BUDA_OCR) and try to load the TibetanCNNPredictor. Returns
+    (predictor, use_cnn); on a missing model or a load failure returns
+    (None, False) after logging.
+
+    module_label (e.g. '[recognize.py]') only prefixes the log messages so each
+    caller keeps its original output. Callers keep their own sklearn-fallback
+    wiring: recognize.py always loads cls+rbfcls; segment.py loads cls only on
+    fallback. (os.path.dirname(__file__) resolves to namsel_ocr/ regardless of
+    which sibling module triggers the load, so the resolved paths are identical.)
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    cnn_dir = next((d for d in (os.path.join(here, 'namsel_BUDA_OCR'),
+                                os.path.join(here, '..', 'namsel_BUDA_OCR'))
+                    if os.path.isdir(d)), os.path.join(here, '..', 'namsel_BUDA_OCR'))
+    cnn_model = os.path.join(cnn_dir, 'best_model.pth')
+    cnn_mapping = os.path.join(cnn_dir, 'label_mapping.json')
+    if os.path.exists(cnn_model) and os.path.exists(cnn_mapping):
+        try:
+            from namsel_BUDA_OCR.predict import TibetanCNNPredictor
+            predictor = TibetanCNNPredictor(cnn_model, cnn_mapping)
+            print("%s Using CNN predictor" % module_label)
+            return predictor, True
+        except Exception as e:
+            print("%s CNN load failed (%s), falling back to sklearn" % (module_label, e))
+    return None, False
+
+
 def predict(x, cls=None):
     '''Predict a single sample point'''
     predicted = cls.predict(x)[0]

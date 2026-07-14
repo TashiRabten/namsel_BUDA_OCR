@@ -7,8 +7,10 @@ import numpy as np
 
 try:
     from .config_manager import default_config
+    from .utils import adaptive_binary_inv
 except ImportError:
     from config_manager import default_config
+    from utils import adaptive_binary_inv
 
 
 class ContourProcessor(object):
@@ -26,18 +28,7 @@ class ContourProcessor(object):
         """Preprocess img_arr into an inverted adaptive-threshold binary. Uses a
         precise float→uint8 conversion (the old cast merged tshegs into main
         characters) and a scale-adaptive odd block size + C."""
-        img_copy = self.img_arr.copy()
-        if img_copy.dtype == np.float64 and img_copy.max() <= 1.0:
-            img_copy = (img_copy * 255.0).round().astype(np.uint8)
-        elif img_copy.dtype != np.uint8:
-            img_copy = img_copy.astype(np.uint8)
-        bootstrap_scale = getattr(self, 'bootstrap_scale', 1.0)
-        block_size = max(3, int(11 * bootstrap_scale))
-        c_param = max(1, int(3.5 * bootstrap_scale))
-        if block_size % 2 == 0:
-            block_size += 1  # OpenCV requires an odd block size
-        return cv.adaptiveThreshold(img_copy, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                    cv.THRESH_BINARY_INV, block_size, c_param)
+        return adaptive_binary_inv(self.img_arr, getattr(self, 'bootstrap_scale', 1.0))
 
     def _filter_by_position(self, contours):
         """Keep contours whose top y is within the document's adaptive band."""
