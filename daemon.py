@@ -20,11 +20,34 @@ import json
 import os
 import traceback
 
-# Auto-update subsystem (config, release lookup, download/install GUI).
-try:
-    from .daemon_updater import check_for_updates_async
-except ImportError:
-    from daemon_updater import check_for_updates_async
+
+def _import_from(module, *names):
+    """Import ``names`` from ``module``, package-qualified first, bare name second.
+
+    The bare-name form is only a fallback for running the engine from its own
+    directory; frozen builds always resolve ``namsel_ocr.<module>``.
+
+    Only a genuinely ABSENT module falls through to the next candidate. An
+    ImportError raised from *inside* the module — a real missing dependency —
+    is re-raised immediately. Without that distinction the old nested
+    ``except ImportError`` chain masked the true cause: one missing third-party
+    package surfaced as four stacked "No module named 'feature_extraction' /
+    'config_manager' / 'daemon_updater'" tracebacks, none of which named the
+    actual culprit.
+    """
+    import importlib
+    last = None
+    for candidate in ('namsel_ocr.' + module, module):
+        try:
+            mod = importlib.import_module(candidate)
+        except ModuleNotFoundError as e:
+            if e.name not in (candidate, 'namsel_ocr'):
+                raise           # a dependency of the module is missing — the real cause
+            last = e
+            continue
+        return tuple(getattr(mod, n) for n in names) if len(names) > 1 else getattr(mod, names[0])
+    raise last
+
 
 # Force UTF-8 output on Windows
 if sys.platform == 'win32':
@@ -37,13 +60,12 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+# Auto-update subsystem (config, release lookup, download/install GUI).
+check_for_updates_async = _import_from('daemon_updater', 'check_for_updates_async')
+
 # Import heavy modules once at startup - this is the expensive part we avoid repeating
-try:
-    from namsel_ocr.namsel import PageRecognizer
-    from namsel_ocr.config_manager import Config
-except ImportError:
-    from namsel import PageRecognizer
-    from config_manager import Config
+PageRecognizer = _import_from('namsel', 'PageRecognizer')
+Config = _import_from('config_manager', 'Config')
 
 # Import preprocessing and segmentation logic
 import cv2

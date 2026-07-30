@@ -1,4 +1,3 @@
-import skops.io as sio
 from cv2 import GaussianBlur
 from cv2 import HuMoments, moments, GaussianBlur
 try:
@@ -58,14 +57,25 @@ import warnings
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     try:
-        # skops (not pickle) — safe deserialization of our own bundled Zernike feature
-        # matrices. trusted=[] accepts only skops' default-safe types (numpy/builtins),
-        # which is all these files contain. os.path.join handles the path separator.
-        D = sio.load(local_file(os.path.join('features', 'D_matrix.skops')), trusted=[])
-        Bpqk = sio.load(local_file(os.path.join('features', 'Bpqk17.skops')), trusted=[])
-        Ipi = sio.load(local_file(os.path.join('features', 'Ipi32.skops')), trusted=[])
+        # numpy .npz (not pickle, not skops) — the three Zernike matrices are plain
+        # float64 arrays, so np.load with allow_pickle=False is data-only (nothing can
+        # execute on load) AND drags in no third-party deserializer. The previous
+        # skops-based load made `import skops` a hard, module-level requirement of the
+        # whole engine: when it was absent from a frozen build the ImportError cascaded
+        # through line_breaker -> namsel -> daemon and the daemon never started.
+        # zernike_features.npz is byte-identical to the former features/*.skops trio.
+        _zf = np.load(local_file(os.path.join('features', 'zernike_features.npz')),
+                      allow_pickle=False)
+        D = _zf['D_matrix']
+        Bpqk = _zf['Bpqk17']
+        Ipi = _zf['Ipi32']
+        _zf.close()
     except Exception as e:
-        print(f"Warning: Could not load feature files: {e}")
+        # Loud, single-line marker: the dummies below keep the engine importable but
+        # Zernike features are meaningless, so recognition accuracy collapses. This
+        # must never be silent in a shipped build.
+        print(f"ERROR: Zernike feature matrices unavailable ({e}) — "
+              f"recognition accuracy will be severely degraded.")
         # Create dummy data with correct dimensions
         D = np.eye(100)
         Bpqk = np.zeros((18, 18, 32))
