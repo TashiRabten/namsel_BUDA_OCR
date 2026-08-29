@@ -7,12 +7,42 @@ update thread) so the daemon stays a lean OCR worker.
 """
 import os
 import sys
+import time
+
+# Own rate limit. The daemon is started on demand and can be launched many times in
+# one session; without this, every launch paid for a network round-trip.
+SELF_CHECK_STAMP = '.namsel_update_check'
+SELF_CHECK_TTL_SEC = 24 * 60 * 60
+# Short, so a slow or unreachable feed can never hold up an OCR daemon that is
+# otherwise ready to work. The check is optional by design.
+HTTP_TIMEOUT_SEC = 8
+
+
+def _log(msg):
+    """Diagnostics go to STDERR, never stdout.
+
+    The updater runs on a background thread while stdout carries the daemon's
+    JSON-line protocol; a print() landing between a request and its response would
+    be consumed by the client as that request's reply.
+    """
+    try:
+        sys.stderr.write("%s" % msg + chr(10))
+        sys.stderr.flush()
+    except Exception:
+        pass
+
 
 def _installer_filename(download_url):
     """Filename for the downloaded installer: URL basename, query stripped, platform extension ensured."""
-    filename = download_url.split("/")[-1]
-    if "?" in filename:
-        filename = filename.split("?")[0]
+    # The release feed proxies assets through .../download-asset?...&filename=<real name>,
+    # so the basename is the FUNCTION name and the real name is in the query. Read the
+    # query first; stripping it blindly yields "download-asset.exe" for every product.
+    from urllib.parse import urlparse, parse_qs
+    parsed = urlparse(download_url)
+    filename = (parse_qs(parsed.query).get("filename", [""])[0] or "").strip()
+    if not filename:
+        filename = parsed.path.split("/")[-1]
+    filename = filename.split("?")[0]
     if not filename.endswith((".exe", ".pkg")):
         is_windows = sys.platform.startswith("win")
         filename = filename + (".exe" if is_windows else ".pkg")
@@ -33,6 +63,64 @@ def _updater_version_file():
     return version_file
 
 
+def _install_dir():
+    """The Namsel install directory — the folder holding version.py and the stamp."""
+    return os.path.dirname(_updater_version_file())
+
+
+def _stamp_is_fresh(name, ttl_sec):
+    """True when the stamp file exists and was written less than ttl_sec ago."""
+    try:
+        return (time.time() - os.path.getmtime(os.path.join(_install_dir(), name))) < ttl_sec
+    except OSError:
+        return False
+
+
+def _touch_stamp(name):
+    """Record that a check just happened. Failure is harmless — worst case we re-check."""
+    try:
+        with open(os.path.join(_install_dir(), name), 'w') as f:
+            f.write(str(int(time.time())))
+    except OSError:
+        pass
+
+
+def _should_skip_check():
+    """(skip, reason) — why this updater should not run right now, if it shouldn't.
+
+    Both gates are resolved without touching the network:
+      1. NAMSEL_SKIP_UPDATE_CHECK — an explicit opt-out for headless, CI, packaged
+         and air-gapped use, where a tkinter window must never appear.
+      2. This updater checked recently — don't re-ask the feed on every daemon start.
+    """
+    if os.environ.get('NAMSEL_SKIP_UPDATE_CHECK'):
+        return True, 'NAMSEL_SKIP_UPDATE_CHECK is set'
+    # No version stamp means this is a source checkout, not an installed build: there is
+    # nothing to compare a release against (the default would be a bare "1.0.0.0", which
+    # every published release beats), and offering a source user a downloadable installer
+    # is the wrong action anyway. Packaged builds ship version.py and do get checked.
+    if not os.path.exists(_updater_version_file()):
+        return True, 'no version.py -- running from source, not an installed build'
+    if _stamp_is_fresh(SELF_CHECK_STAMP, SELF_CHECK_TTL_SEC):
+        return True, 'already checked within the last %dh' % (SELF_CHECK_TTL_SEC // 3600)
+    return False, None
+
+
+def _strip_tag_prefix(tag_name):
+    """Version string from a release tag, stripping the app-specific prefix.
+
+    Handles 'namsel-v1.0.1' -> '1.0.1', plain 'v1.0.1' -> '1.0.1', and unprefixed
+    tags unchanged. Release tags are published as namsel-v<x.y.z.b>; without this
+    the whole tag reached _parse_version, failed int(), and every release compared
+    as (0,0,0,0) — so no update was ever offered.
+    """
+    if tag_name.startswith("namsel-v"):
+        return tag_name[len("namsel-v"):]
+    if tag_name.startswith("v"):
+        return tag_name[1:]
+    return tag_name
+
+
 def _load_updater_config():
     """(CURRENT_VERSION, GITHUB_RELEASES_API, BRANCH_NAME) — defaults overridden by version.py."""
     current = "1.0.0.0"
@@ -50,7 +138,7 @@ def _load_updater_config():
                     elif line.startswith('BRANCH_NAME ='):
                         branch = line.split('=')[1].strip().strip('"\'')
         except Exception as e:
-            print(f"[daemon] version file unreadable, using defaults: {e}")
+            _log(f"[daemon] version file unreadable, using defaults: {e}")
     return current, api, branch
 
 
@@ -87,7 +175,15 @@ def _https_get(url, headers=None, timeout=15, max_redirects=5):
     raise IOError("too many redirects: %s" % url)
 
 def _fetch_branch_release(api, branch):
-    """The first release dict whose target_commitish matches branch, or None."""
+    """The NEWEST release dict for this branch, or None.
+
+    Previously this returned the first feed entry whose target_commitish matched,
+    which is only correct while the feed happens to be ordered newest-first. The
+    default Netlify feed does sort that way, but GITHUB_RELEASES_API is overridable
+    via version.py and GitHub's own /releases orders by created_at — where a release
+    drafted early and published late sorts below an older one. Version-compare every
+    candidate instead of trusting the server's order.
+    """
     import json
     conn, response = _https_get(
         api,
@@ -95,7 +191,7 @@ def _fetch_branch_release(api, branch):
             "Accept": "application/vnd.github+json",
             "User-Agent": "NamselOCR-AutoUpdater/1.0"
         },
-        timeout=15
+        timeout=HTTP_TIMEOUT_SEC
     )
     try:
         if response.status != 200:
@@ -104,17 +200,30 @@ def _fetch_branch_release(api, branch):
     finally:
         conn.close()
     releases = data if isinstance(data, list) else [data]
+    best = None
+    best_version = None
     for r in releases:
-        if isinstance(r, dict) and r.get("target_commitish") == branch:
-            return r
-    return None
+        if not isinstance(r, dict) or r.get("target_commitish") != branch:
+            continue
+        version = _parse_version(_strip_tag_prefix(r.get("tag_name", "")))
+        if best_version is None or version > best_version:
+            best, best_version = r, version
+    return best
 
 
 def _parse_version(v):
+    """A 4-part comparable tuple.
+
+    Padding matters because Python compares tuples element-wise and a longer tuple
+    with an equal prefix sorts GREATER: unpadded, a 4-part tag "1.0.1.0" would
+    compare greater than an installed 3-part "1.0.1" — the same version — and the
+    update prompt would reappear on every launch forever.
+    """
     try:
-        return tuple(int(p) for p in v.split("."))
+        parts = tuple(int(p) for p in v.split("."))
     except Exception:
         return (0, 0, 0, 0)
+    return (parts + (0, 0, 0, 0))[:4]
 
 
 def _find_platform_asset_url(release):
@@ -138,6 +247,11 @@ def _format_release_notes(release):
 def check_for_updates_async():
     """Check for updates in background thread and show GUI if update available."""
     try:
+        skip, reason = _should_skip_check()
+        if skip:
+            _log("[daemon] update check skipped: %s" % reason)
+            return
+        _touch_stamp(SELF_CHECK_STAMP)
         current_version, api, branch = _load_updater_config()
         release = _fetch_branch_release(api, branch)
         if not release:
@@ -145,7 +259,7 @@ def check_for_updates_async():
         tag_name = release.get("tag_name", "")
         if not tag_name:
             return
-        latest_version = tag_name[1:] if tag_name.startswith("v") else tag_name
+        latest_version = _strip_tag_prefix(tag_name)
         if _parse_version(latest_version) <= _parse_version(current_version):
             return  # No update needed
         download_url = _find_platform_asset_url(release)
@@ -153,7 +267,7 @@ def check_for_updates_async():
             return
         show_update_gui(latest_version, download_url, _format_release_notes(release))
     except Exception as e:
-        print(f"[daemon] update check skipped: {e}")  # update check is optional
+        _log(f"[daemon] update check skipped: {e}")  # update check is optional
 
 
 def _build_notes_area(body, release_notes):
@@ -311,7 +425,7 @@ def show_update_gui(version, download_url, release_notes):
                 root.after(0, on_download_complete)
             
             except Exception as e:
-                root.after(0, lambda: on_download_error(str(e)))
+                root.after(0, lambda msg=str(e): on_download_error(msg))  # bind now: Python clears `e` when the except block exits
         
         def on_download_complete():
             progress_bar['value'] = 100
@@ -370,4 +484,4 @@ def show_update_gui(version, download_url, release_notes):
         
     except Exception as e:
         # GUI can't be shown (headless daemon / missing display) — log and continue.
-        print(f"[updater] update GUI unavailable: {e}")
+        _log(f"[updater] update GUI unavailable: {e}")

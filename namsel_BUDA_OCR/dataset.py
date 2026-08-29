@@ -16,6 +16,18 @@ from torch.utils.data import Dataset, DataLoader
 from scipy.ndimage import rotate, shift, zoom, gaussian_filter, map_coordinates
 
 
+def _load_csv_dataset(data_dir, filename, label, reshape_1d=False):
+    """Loads a comma-delimited uint32 dataset by name, or None when the file is absent."""
+    path = os.path.join(data_dir, filename)
+    if not os.path.exists(path):
+        return None
+    data = np.genfromtxt(path, np.uint32, delimiter=',')
+    if reshape_1d and data.ndim == 1:
+        data = data.reshape(1, -1)
+    print(f"  {label}: {data.shape[0]} samples")
+    return data
+
+
 def load_all_training_data(data_dir):
     """Load all Namsel training datasets from the datasets directory.
 
@@ -28,26 +40,15 @@ def load_all_training_data(data_dir):
     """
     all_data = []
 
-    # 1. font-draw-samples.txt (primary training data)
-    font_draw = os.path.join(data_dir, 'font-draw-samples.txt')
-    if os.path.exists(font_draw):
-        data = np.genfromtxt(font_draw, np.uint32, delimiter=',')
-        all_data.append(data)
-        print(f"  font-draw-samples: {data.shape[0]} samples")
-
-    # 2. tibcharsamples.txt
-    tibchar = os.path.join(data_dir, 'tibcharsamples.txt')
-    if os.path.exists(tibchar):
-        data = np.genfromtxt(tibchar, np.uint32, delimiter=',')
-        all_data.append(data)
-        print(f"  tibcharsamples: {data.shape[0]} samples")
-
-    # 3. ui_samples.csv (manually labeled via UI)
-    ui_samples = os.path.join(data_dir, 'ui_samples.csv')
-    if os.path.exists(ui_samples):
-        data = np.genfromtxt(ui_samples, np.uint32, delimiter=',')
-        all_data.append(data)
-        print(f"  ui_samples: {data.shape[0]} samples")
+    # 1-3. CSV-style datasets (comma-delimited uint32).
+    for filename, label in (
+        ('font-draw-samples.txt', 'font-draw-samples'),  # primary training data
+        ('tibcharsamples.txt', 'tibcharsamples'),
+        ('ui_samples.csv', 'ui_samples'),               # manually labeled via UI
+    ):
+        data = _load_csv_dataset(data_dir, filename, label)
+        if data is not None:
+            all_data.append(data)
 
     # 4. normalized_3216_to_3232_training.npy
     norm_npy = os.path.join(data_dir, 'normalized_3216_to_3232_training.npy')
@@ -56,14 +57,10 @@ def load_all_training_data(data_dir):
         all_data.append(data)
         print(f"  normalized_3216_to_3232: {data.shape[0]} samples")
 
-    # 5. symbols.txt
-    symbols = os.path.join(data_dir, 'symbols.txt')
-    if os.path.exists(symbols):
-        data = np.genfromtxt(symbols, np.uint32, delimiter=',')
-        if data.ndim == 1:
-            data = data.reshape(1, -1)
+    # 5. symbols.txt (may be a single 1-D row)
+    data = _load_csv_dataset(data_dir, 'symbols.txt', 'symbols', reshape_1d=True)
+    if data is not None:
         all_data.append(data)
-        print(f"  symbols: {data.shape[0]} samples")
 
     # 6. Character-specific additions, stored as .npy (data-only; migrated off
     #    pickle via convert_datasets_to_npy.py). np.load(allow_pickle=False)

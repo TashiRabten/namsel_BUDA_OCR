@@ -55,10 +55,22 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', errors='replace')
 
-# Add parent directory to path so namsel_ocr package imports work
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Add parent directory to path so namsel_ocr package imports work.
+engine_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(engine_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+
+# ...but the engine's own directory must come FIRST. In the standalone layout the
+# repository directory is itself named namsel_BUDA_OCR and contains a package of the
+# same name, so a parent-first sys.path makes `import namsel_BUDA_OCR` resolve to the
+# REPO ROOT instead of the CNN package. load_cnn_predictor then fails, the engine
+# falls back to the sklearn classifier, and recognition quality silently drops with
+# nothing but a printed warning. Harmless in the namsel_ocr/ package layout, where
+# there is no such collision.
+if engine_dir in sys.path:
+    sys.path.remove(engine_dir)
+sys.path.insert(0, engine_dir)
 
 # Auto-update subsystem (config, release lookup, download/install GUI).
 check_for_updates_async = _import_from('daemon_updater', 'check_for_updates_async')
@@ -251,46 +263,12 @@ def segment_lines(input_path, output_dir, min_gap=3):
     }
 
 
-def _process_photi_request(request, image_path):
-    """PhotiLines_v2 line detection path of process_request."""
-    conf_kwargs = {
-        "page_type": request.get("page_type", "book"),
-        "recognizer": request.get("recognizer", "probout"),
-        "line_break_method": "line_cut",   # internal fallback (unused by photi path)
-        "low_ink": False,
-        "viterbi_postprocessing": False,
-        "postprocess": False,
-        "clear_hr": False,
-        "detect_o": False,
-        "force_single_line": False,
-    }
-    if request.get("debug_output"):
-        conf_kwargs["debug_output"] = True
-
-    conf = Config(**conf_kwargs)
-
-    try:
-        from namsel_ocr.photi_recognizer import recognize_page_photi
-    except ImportError:
-        from photi_recognizer import recognize_page_photi
-
-    try:
-        text = recognize_page_photi(image_path, conf)
-    except Exception as e:
-        return {"status": "error", "text": "", "error": str(e)}
-
-    return {"status": "ok", "text": text}
-
-
 def process_request(request):
     """Process a single OCR request and return the result dict."""
     image_path = request["image_path"]
 
     if not os.path.exists(image_path):
         return {"status": "error", "text": "", "error": f"File not found: {image_path}"}
-
-    if request.get("line_break_method") == "photi":
-        return _process_photi_request(request, image_path)
 
     conf_kwargs = {
         "page_type": request.get("page_type", "book"),

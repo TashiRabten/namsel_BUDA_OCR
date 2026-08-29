@@ -22,13 +22,13 @@ If you are a researcher or developer, the engine here is the production source b
 
 The upstream Namsel OCR is an excellent but aging Python 2.7 code base. This fork brings it fully up to date:
 
-- **Python 3.12.** Ported from Python 2.7; the Cython extensions build for CPython 3.12 (prebuilt `*.cp312-win_amd64.pyd` / `*.cpython-312-*.so` are included).
+- **Python 3.12.** Ported from Python 2.7. The five accelerated modules each ship a pure-Python fallback (`fast_utils.py`, `sobel_features.py`, `transitions.py`, `viterbi_cython.py`, `zernike_moments.py`), so a fresh clone runs with no compilation step at all. Building the Cython extensions is optional and only makes it faster — compiled binaries are **not** committed to this repository.
 - **CNN character recognizer.** A PyTorch convolutional model (**1,020 Tibetan character classes, ~95.5% validation accuracy**) replaces the legacy scikit-learn logistic/RBF classifiers. The engine loads the CNN automatically when present and falls back to the sklearn classifier if it is not. See [`namsel_BUDA_OCR/`](namsel_BUDA_OCR).
 - **No `pickle` in the load path.** Every bundled model and dataset now loads through a **data-only** format that cannot execute code on load:
   | Data | Old | New |
   |---|---|---|
   | character maps, n-gram & bigram tables | `pickle` / `shelve` | **gzip + JSON** (`safe_model_io.py`) |
-  | Zernike feature matrices | `pickle` | **skops** (`features/*.skops`) |
+  | Zernike feature matrices | `pickle`, then `skops` | **NumPy `.npz`**, `allow_pickle=False` (`features/zernike_features.npz`) |
   | CNN training datasets | `pickle` | **NumPy `.npy`** |
   | classifiers | `pickle` | **joblib** |
 
@@ -47,11 +47,17 @@ The upstream Namsel OCR is an excellent but aging Python 2.7 code base. This for
 
 ## Install
 
-Requires **Python 3.12**, plus `numpy`, `opencv-python`, `scikit-learn`, `scipy`, `Pillow`, `torch` (CNN backend), `skops`, and a C compiler to build the Cython modules (prebuilt binaries for common platforms are included).
+Requires **Python 3.12** and the packages in `requirements.txt` (`numpy`, `opencv-python`, `scikit-learn`, `scikit-image`, `scipy`, `Pillow`, `joblib`, `onnxruntime`, `matplotlib`, `lxml`). `torch` is optional — it is only needed to load `best_model.pth`; the bundled `best_model.onnx` runs on `onnxruntime` alone. `skops` is **no longer required**.
+
+No compiler is needed: every accelerated module has a pure-Python fallback. To build the faster Cython extensions you additionally need `Cython` and a C toolchain.
 
 ```bash
 pip install -r requirements.txt
-# build the Cython extensions in place (skip if using the bundled binaries)
+
+# Optional: build the Cython extensions in place for speed.
+# Needs Cython (not in requirements.txt) and a C compiler. Without this step the
+# pure-Python fallbacks are used automatically.
+pip install Cython
 python setup.py build_ext --inplace
 ```
 
@@ -139,6 +145,15 @@ Datasets are stored as data-only NumPy `.npy` (label + 1024 pixels per sample).
 Training is GPU/Colab-friendly.
 
 ---
+
+## Legacy files
+
+Superseded artifacts are kept under [`legacy/`](legacy) rather than deleted, with a
+[README](legacy/README.md) recording why each was retired. Nothing there is on any code
+path: the Python 2.7 install scripts, the `.skops` Zernike matrices (replaced by
+`features/zernike_features.npz`), the `zernike_scaler-latest` backups, the unused
+`portable_*.pkl` character maps, three orphaned modules, and the CPython 3.10 extension
+binaries. Do not restore anything from `legacy/` without reading the reason it was retired.
 
 ## About the BUDA project
 

@@ -87,8 +87,14 @@ class TibetanCNNPredictor:
         # Select backend
         self._onnx_session = None
         self._backend = 'pytorch'
-        val_acc = 'N/A'
+        val_acc = self._select_backend(model_path, backend)
 
+        print(f"Loaded CNN model: {self.num_classes} classes, "
+              f"val_acc={val_acc}, backend={self._backend}")
+
+    def _select_backend(self, model_path, backend):
+        """Resolve the inference backend (auto/onnx/quantized/pytorch); returns val_acc for logging."""
+        val_acc = 'N/A'
         if backend == 'auto':
             onnx_path = model_path.replace('.pth', '.onnx')
             if os.path.exists(onnx_path) and self._try_load_onnx(onnx_path):
@@ -132,9 +138,7 @@ class TibetanCNNPredictor:
                 raise ImportError("PyTorch backend requires PyTorch")
             self._checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
             self._load_pytorch_model()
-
-        print(f"Loaded CNN model: {self.num_classes} classes, "
-              f"val_acc={val_acc}, backend={self._backend}")
+        return val_acc
 
     def _load_pytorch_model(self):
         """Load the PyTorch model from checkpoint."""
