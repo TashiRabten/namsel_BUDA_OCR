@@ -61,6 +61,10 @@ pip install Cython
 python setup.py build_ext --inplace
 ```
 
+### Build a standalone macOS daemon package
+
+On macOS, install the Python 3.12 requirements and run `bash installer/macos/build_pkg.sh`. The package is built for the architecture of the Python installation; use Apple Silicon Python for an `arm64` build. See [`installer/macos/README.md`](installer/macos/README.md) for details.
+
 The original project also publishes ready-to-run Docker images:
 
 ```bash
