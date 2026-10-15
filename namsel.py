@@ -8,7 +8,7 @@ try:
     from .config_util import load_config
     from .line_breaker import LineCluster, LineCut
     from .page_elements2 import PageElements as PE2, PageElementsOptions as PE2Options
-    from .scale_invariant_preprocessing import apply_scale_invariant_preprocessing
+    from .scale_invariant_preprocessing import apply_scale_invariant_preprocessing, apply_band_preprocessing
     from .recognize import cls, rbfcls
     # Restore original sophisticated recognition pipeline
     from .recognize import recognize_chars_probout, recognize_chars_hmm
@@ -19,7 +19,7 @@ except ImportError:
     from config_util import load_config
     from line_breaker import LineCluster, LineCut
     from page_elements2 import PageElements as PE2, PageElementsOptions as PE2Options
-    from scale_invariant_preprocessing import apply_scale_invariant_preprocessing
+    from scale_invariant_preprocessing import apply_scale_invariant_preprocessing, apply_band_preprocessing
     from recognize import cls, rbfcls
     # Restore original sophisticated recognition pipeline
     from recognize import recognize_chars_probout, recognize_chars_hmm
@@ -72,7 +72,10 @@ class PageRecognizer(object):
         # Apply scale-invariant preprocessing for optimal OCR performance
         if self.conf.get('debug_output', False):
             print(f"[PREPROCESSING] Applying scale-invariant preprocessing to {imagefile}")
-        self.page_array = apply_scale_invariant_preprocessing(raw_page_array)
+        if self.conf.get('force_single_line', False):
+            self.page_array = apply_band_preprocessing(raw_page_array)
+        else:
+            self.page_array = apply_scale_invariant_preprocessing(raw_page_array)
         # Check if image is truly blank (no dark pixels at all)
         # Use threshold < 0.5 to find text pixels instead of .all() which fails
         # when min pixel value is slightly above 0 (e.g. 0.086)

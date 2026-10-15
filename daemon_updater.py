@@ -5,6 +5,7 @@ http.client (B310-safe _https_get), and the tkinter download/install GUI.
 Split out of daemon.py (which only calls check_for_updates_async from its
 update thread) so the daemon stays a lean OCR worker.
 """
+import contextlib
 import os
 import sys
 import time
@@ -24,12 +25,17 @@ def _log(msg):
     The updater runs on a background thread while stdout carries the daemon's
     JSON-line protocol; a print() landing between a request and its response would
     be consumed by the client as that request's reply.
+
+    A frozen GUI build has no console (sys.stderr is None), and a closed or broken
+    stream raises OSError / ValueError; either way the message has nowhere to go, and a
+    diagnostic must never take the updater thread down with it.
     """
-    try:
-        sys.stderr.write("%s" % msg + chr(10))
-        sys.stderr.flush()
-    except Exception:
-        pass
+    stream = sys.stderr
+    if stream is None:
+        return
+    with contextlib.suppress(OSError, ValueError):
+        stream.write("%s\n" % msg)
+        stream.flush()
 
 
 def _installer_filename(download_url):

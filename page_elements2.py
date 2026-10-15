@@ -241,9 +241,11 @@ class PageElements(ScaleCalculator, ContourProcessor, LayoutDetector):
         neutral) used only for early punctuation routing; segment.py does the real
         classification for everything else."""
         prprob = np.zeros((1, num_classes))
-        if area <= int(50 * scale_factor) and w <= int(15 * scale_factor) and h <= int(15 * scale_factor):
+        # Areas grow with the square of the scale; a limit linear in it rejected 12x13 tshegs at scale 3.
+        area_scale = scale_factor * max(1.0, scale_factor)
+        if area <= int(50 * area_scale) and w <= int(15 * scale_factor) and h <= int(15 * scale_factor):
             cls_ = 510  # ་ tsheg (small square-ish)
-        elif area <= int(350 * scale_factor) and aspect_ratio >= 4.0 and w <= int(10 * scale_factor):
+        elif area <= int(350 * area_scale) and aspect_ratio >= 4.0 and w <= int(10 * scale_factor):
             cls_ = 511  # ། shad (tall thin)
         else:
             prprob[0][0] = 1.0  # neutral — let segment.py classify
@@ -322,11 +324,27 @@ class PageElements(ScaleCalculator, ContourProcessor, LayoutDetector):
         else:
             max_width = max_width_base
             max_area = max_area_base
-        if (cbox[2] >= min_width and cbox[3] >= min_width and
+        tall_enough = cbox[3] >= min_width or self._flat_tsheg(cbox)
+        if (cbox[2] >= min_width and tall_enough and
                 cbox[2] <= max_width and cbox[3] <= max_width and
                 min_area <= area <= max_area):
             self.small_contour_indices.append(i)
         # else: filtered (drop)
+
+    def _flat_tsheg(self, cbox):
+        """A tsheg a little flatter than the height minimum (Monlam Bodyig: 12x11 where the minimum is 12) is still
+        a tsheg when it has this line's own tsheg width, is roughly square and solid, and is not cut by the band's edge
+        (pieces of the neighbouring line and specks are not)."""
+        x, y, w, h = cbox
+        scale_factor = getattr(self, 'global_scale_factor', 1.0)
+        if h < max(2, int(2 * scale_factor)) or w > 1.6 * h:
+            return False
+        if abs(w - self.tsek_mean) > max(1.0, self.tsek_std):
+            return False
+        if y <= 0 or y + h >= self.img_arr.shape[0]:
+            return False
+        box = self.img_arr[y:y + h, x:x + w]
+        return box.size > 0 and float((box < 0.5).mean()) >= 0.35
 
     def _route_tsheg_fixed(self, i, cbox, area):
         """Fixed-threshold tsheg gate (no tsek_mean yet) → main indices."""

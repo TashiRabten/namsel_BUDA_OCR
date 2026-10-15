@@ -28,7 +28,8 @@ class ContourProcessor(object):
         """Preprocess img_arr into an inverted adaptive-threshold binary. Uses a
         precise float→uint8 conversion (the old cast merged tshegs into main
         characters) and a scale-adaptive odd block size + C."""
-        return adaptive_binary_inv(self.img_arr, getattr(self, 'bootstrap_scale', 1.0))
+        return adaptive_binary_inv(self.img_arr, getattr(self, 'bootstrap_scale', 1.0),
+                                   getattr(self, 'force_single_line', False))
 
     def _filter_by_position(self, contours):
         """Keep contours whose top y is within the document's adaptive band."""

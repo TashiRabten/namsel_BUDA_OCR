@@ -94,7 +94,7 @@ class ScaleCalculator(object):
         # img_copy.shape[0].)
         bootstrap_scale = max(0.5, min(3.0, self.img_arr.shape[0] / 106))
         self.bootstrap_scale = bootstrap_scale
-        basic_binary = adaptive_binary_inv(self.img_arr, bootstrap_scale)
+        basic_binary = adaptive_binary_inv(self.img_arr, bootstrap_scale, getattr(self, 'force_single_line', False))
         result = cv.findContours(basic_binary, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
         contours = result[0] if len(result) == 2 else result[1]
 

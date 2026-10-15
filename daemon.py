@@ -270,9 +270,17 @@ def process_request(request):
     if not os.path.exists(image_path):
         return {"status": "error", "text": "", "error": f"File not found: {image_path}"}
 
+    # A single line goes to the line reader when its model is installed (namsel_BUDA_OCR/line_model);
+    # "recognizer": "stack" asks for the segmenter + stack classifier instead, which also read every page.
+    if request.get("force_single_line") and request.get("recognizer") != "stack":
+        reader = _import_from("line_reader", "shared_reader")()
+        if reader is not None:
+            return {"status": "ok", "text": reader.read_path(image_path), "reader": "line"}
+
+    recognizer = request.get("recognizer", "probout")
     conf_kwargs = {
         "page_type": request.get("page_type", "book"),
-        "recognizer": request.get("recognizer", "probout"),
+        "recognizer": "probout" if recognizer == "stack" else recognizer,
         "line_break_method": request.get("line_break_method", "line_cut"),
         "low_ink": False,
         "viterbi_postprocessing": False,

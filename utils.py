@@ -10,18 +10,22 @@ from secrets import choice
 interp = INTER_CUBIC
 
 
-def adaptive_binary_inv(img_arr, bootstrap_scale):
+def adaptive_binary_inv(img_arr, bootstrap_scale, single_line=False):
     '''Precise float->uint8 conversion (the old plain cast merged tshegs into main
     characters) + a scale-adaptive odd block size / C, then an inverted Gaussian
     adaptive threshold. Shared by ContourProcessor._prep_binary and
-    ScaleCalculator's preliminary-scale bootstrap.'''
+    ScaleCalculator's preliminary-scale bootstrap. single_line: a pre-segmented line
+    (force_single_line), whose C stays fixed.'''
     img_copy = img_arr.copy()
     if img_copy.dtype == np.float64 and img_copy.max() <= 1.0:
         img_copy = (img_copy * 255.0).round().astype(np.uint8)
     elif img_copy.dtype != np.uint8:
         img_copy = img_copy.astype(np.uint8)
     block_size = max(3, int(11 * bootstrap_scale))
-    c_param = max(1, int(3.5 * bootstrap_scale))
+    # C is a gray-level offset: for a single line it does not grow with the text. Grown with the line's
+    # internal enlargement (1.2x -> C 3, 1.5x -> C 4) it erased the anti-aliased edges of tshegs and whole
+    # lines lost them. Pages keep the scaled C (the experimental segmenter's golden reads worse without it).
+    c_param = 3 if single_line else max(1, int(3.5 * bootstrap_scale))
     if block_size % 2 == 0:
         block_size += 1  # OpenCV requires an odd block size
     return adaptiveThreshold(img_copy, 255, ADAPTIVE_THRESH_GAUSSIAN_C,

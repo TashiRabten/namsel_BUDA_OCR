@@ -110,6 +110,23 @@ def apply_scale_invariant_preprocessing(img_array: np.ndarray, min_char_size: in
     logger.info(f"Conservative preprocessing complete: {result.shape}, range: {result.min():.3f}-{result.max():.3f}")
     return result
 
+# Enlargement of a pre-segmented line (force_single_line) before it is read. Fixed: the page rule below decides
+# from the IMAGE's height (< 100 px) and from components under 30% of it, so the paper a line finder leaves
+# above or below a line changed whether and how much it was enlarged (1.0x to 1.5x for lines of one font and
+# size). 1.2x was measured against 1.35x and a target-width rule; it read best on rendered pages, the user's
+# print and captures alike.
+BAND_SCALE = 1.2
+
+
+def apply_band_preprocessing(img_array: np.ndarray) -> np.ndarray:
+    """A pre-segmented line, enlarged by BAND_SCALE; returned in the [0, 1] range like the page path."""
+    img_uint8 = (img_array * 255).astype(np.uint8) if img_array.max() <= 1.0 else img_array.astype(np.uint8)
+    height, width = img_uint8.shape[:2]
+    img_uint8 = cv.resize(img_uint8, (int(width * BAND_SCALE), int(height * BAND_SCALE)),
+                          interpolation=cv.INTER_LINEAR)
+    return img_uint8.astype(np.float64) / 255.0
+
+
 def should_apply_preprocessing(img_array: np.ndarray) -> bool:
     """
     Determine if preprocessing should be applied based on image characteristics
